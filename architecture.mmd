@@ -17,14 +17,32 @@ classDiagram
         +AXI4-Lite Master
     }
 
-    class axi_lite_1to2_decoder {
-        <<AXI-Lite Router>>
-        +0-Cycle Routing
+    class axi_crossbar_1 {
+        <<AXI-Lite Crossbar 2x4>>
+        +S00: RISC-V PicoRV32
+        +S01: XDMA Host BAR0
+        +M00: 128KB BRAM (0x00000)
+        +M01: Control Regs (0x20000)
+        +M02: GPC Core (0x10000000)
+        +M03: UART Lite (0x20000000)
+    }
+
+    class rv_control_register {
+        <<AXI-Lite Control Peripheral>>
+        +CPU Soft Reset (0x04)
+        +Host IRQ Doorbell (0x00)
+    }
+
+    class gpc_control_register {
+        <<AXI-Lite GPC Peripheral>>
+        +Scheduler Doorbell & Status (0x00~0x24)
+        +I-RAM Broadcast Window (0x1000~0x1FFF)
     }
 
     class riscv_bram {
-        <<Dual-Port Mailbox BRAM>>
-        +16KB Capacity
+        <<Single-Port 128KB BRAM>>
+        +Firmware & Stack (0x0000~0x0FFF)
+        +Ring Buffer (0x18000~0x1FFFF)
     }
 
     class gpu_streaming_multiprocessor {
@@ -32,7 +50,7 @@ classDiagram
         +AXI-Lite Slave (Control & I-RAM)
         +AXI4-Full Master (256-bit)
     }
-    
+
     class sm_warp_allocator {
         <<Global Warp Allocator>>
         +Dispatch Warp ID
@@ -81,7 +99,7 @@ classDiagram
         +S01: GPU Hardware Engine (256-bit)
         +M00: Clock Converter (256-bit)
     }
-    
+
     class axi_clock_converter_0 {
         <<AXI Clock Converter (CDC)>>
         +S: 125MHz (userclk1)
@@ -105,7 +123,7 @@ classDiagram
         +2-Stage Reset Synchronizer
         +HDMI Timing Gen & SiI9134 I2C
     }
-    
+
     gpu_processing_cluster *-- gpu_streaming_multiprocessor
 
     gpu_streaming_multiprocessor *-- sm_warp_allocator
@@ -117,21 +135,24 @@ classDiagram
     sm_processing_block *-- sm_cuda_cores
 
     %% Data & Control Flow Connections
-    xdma_0 --> riscv_bram : 1a. AXI4-Lite (xdma_rv_axil to BRAM Port B)
-    xdma_0 --> picorv32_axi : BRAM_MAILBOX interupt
-    picorv32_axi --> axi_lite_1to2_decoder : 1b. AXI4-Lite (rv_axi)
-    axi_lite_1to2_decoder --> riscv_bram : 1c. AXI4-Lite (bram_axi to Port A)
-    
+    xdma_0 --> axi_crossbar_1 : 1a. AXI4-Lite
+    picorv32_axi --> axi_crossbar_1 : 1b. AXI4-Lite
+
+    axi_crossbar_1 --> riscv_bram : 1c. M00 BRAM Controller (0x0000_0000)
+    axi_crossbar_1 --> rv_control_register : 1d. M01 Control Regs (0x0002_0000)
+    axi_crossbar_1 --> gpc_control_register : 1e. M02 GPC Slave (0x1000_0000)
+    axi_crossbar_1 --> axi_uartlite_0 : 1f. M03 UART Lite (0x2000_0000)
+
     xdma_0 --> axi_dwidth_converter_0 : 2a. AXI4 64-bit (xdma_dwconv_axi)
     axi_dwidth_converter_0 --> axi_crossbar_0 : 2b. AXI4 256-bit (dwconv_xbar_axi)
-    
-    axi_lite_1to2_decoder --> gpu_processing_cluster : 3. AXI4-Lite (rv_gpu_axil)
-    
+
+    gpc_control_register --> gpu_streaming_multiprocessor : 3. Internal Control & I-RAM Broadcast
+
     gpu_processing_cluster --> axi_crossbar_0 : 4. AXI4-Full (gpu_xbar_axi)
-    
+
     axi_crossbar_0 --> axi_clock_converter_0 : 5a. AXI4 256-bit (xbar_cdc_axi)
     axi_clock_converter_0 --> mig_7series_0 : 5b. AXI4 256-bit (cdc_mig_axi)
-    
+
     %% Internal SM Execution Flow
     sm_warp_allocator --> sm_warp_context : 6a. Allocate Grid Warps (Global Dispatch)
     sm_warp_context --> sm_fetch_decode : 6b. Issue Ready PC
@@ -139,7 +160,7 @@ classDiagram
     sm_vector_regfile --> sm_cuda_cores : 6d. Vector Operands
     sm_cuda_cores --> sm_vector_regfile : 6e. Write-Back Result
     sm_cuda_cores --> sm_warp_context : 6f. Update PC / Warp State
-    
+
     %% Output
     sm_cuda_cores --> framebuffer_ram : 7. Render Pixel RGB (Future Integration)
     framebuffer_ram --> hdmi_top : 8. Scanout to HDMI Monitor

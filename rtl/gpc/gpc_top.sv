@@ -23,93 +23,36 @@ module gpc_top (
     end
     wire gpc_rst_n = gpc_rst_n_reg;
 
-    // 1. AXI-Lite Register Decoder & Configuration
-    reg [31:0] src_addr;
-    reg [31:0] dst_addr;
-    reg [15:0] grid_dim_x, grid_dim_y;
-    reg [15:0] block_dim_x, block_dim_y;
-    reg hw_trigger;
+    // 1. AXI-Lite Register Decoder & Configuration (Registered Slave Peripheral)
+    wire [31:0] src_addr;
+    wire [31:0] dst_addr;
+    wire [15:0] grid_dim_x, grid_dim_y;
+    wire [15:0] block_dim_x, block_dim_y;
+    wire        hw_trigger;
     
     // Broadcast I-RAM Signals to all SMs
-    reg iram_we_reg;
-    reg [11:0] iram_waddr_reg;
-    reg [31:0] iram_wdata_reg;
+    wire        iram_we_reg;
+    wire [11:0] iram_waddr_reg;
+    wire [31:0] iram_wdata_reg;
 
-    assign s_axi_lite.awready = 1'b1;
-    assign s_axi_lite.wready = 1'b1;
-    assign s_axi_lite.bvalid = s_axi_lite.wvalid && s_axi_lite.awvalid;
-    assign s_axi_lite.bresp = 2'b00;
+    wire        grid_done_status;
 
-    assign s_axi_lite.arready = 1'b1;
-    assign s_axi_lite.rvalid = s_axi_lite.arvalid;
-    assign s_axi_lite.rresp = 2'b00;
-
-    wire grid_done_status;
-    reg grid_done_reg;
-
-    always @(posedge clk or negedge gpc_rst_n) begin
-        if (!gpc_rst_n) begin
-            hw_trigger <= 1'b0;
-            grid_done_reg <= 1'b0;
-            grid_dim_x <= 16'd1;
-            grid_dim_y <= 16'd1;
-            block_dim_x <= 16'd1;
-            block_dim_y <= 16'd1;
-            src_addr <= 32'd0;
-            dst_addr <= 32'd0;
-            
-            iram_we_reg <= 1'b0;
-            iram_waddr_reg <= 12'd0;
-            iram_wdata_reg <= 32'd0;
-        end else begin
-            iram_we_reg <= 1'b0;
-            hw_trigger <= 1'b0; // Auto-clear pulse
-
-            if (s_axi_lite.awvalid && s_axi_lite.wvalid) begin
-                if (s_axi_lite.awaddr[12]) begin
-                    // 0x1000 ~ 0x1FFF : I-RAM Word Write (Broadcast)
-                    iram_we_reg <= 1'b1;
-                    iram_waddr_reg <= {2'b00, s_axi_lite.awaddr[11:2]};
-                    iram_wdata_reg <= s_axi_lite.wdata;
-                end else begin
-                    // 0x0000 ~ 0x0FFF : Control Registers
-                    case (s_axi_lite.awaddr[7:0])
-                        8'h00: hw_trigger <= s_axi_lite.wdata[0];
-                        8'h08: grid_done_reg <= 1'b0; // INT_ACK clears done flag
-                        8'h0C: grid_dim_x <= s_axi_lite.wdata[15:0];
-                        8'h10: grid_dim_y <= s_axi_lite.wdata[15:0];
-                        8'h14: block_dim_x <= s_axi_lite.wdata[15:0];
-                        8'h18: block_dim_y <= s_axi_lite.wdata[15:0];
-                        8'h20: src_addr <= s_axi_lite.wdata;
-                        8'h24: dst_addr <= s_axi_lite.wdata;
-                    endcase
-                end
-            end
-            
-            // Set done flag when grid finishes from TBS
-            if (grid_done_status) begin
-                grid_done_reg <= 1'b1;
-            end
-        end
-    end
-
-    reg [31:0] rdata_reg;
-    // send data when read address change from 
-    always @(*) begin
-        rdata_reg = 32'd0;
-        if (!s_axi_lite.araddr[12]) begin
-            case (s_axi_lite.araddr[7:0])
-                8'h04: rdata_reg = {31'd0, grid_done_reg};
-                8'h0C: rdata_reg = {16'd0, grid_dim_x};
-                8'h10: rdata_reg = {16'd0, grid_dim_y};
-                8'h14: rdata_reg = {16'd0, block_dim_x};
-                8'h18: rdata_reg = {16'd0, block_dim_y};
-                8'h20: rdata_reg = src_addr;
-                8'h24: rdata_reg = dst_addr;
-            endcase
-        end
-    end
-    assign s_axi_lite.rdata = rdata_reg;
+    gpc_control_register u_gpc_ctrl (
+        .clk              (clk),
+        .rst_n            (gpc_rst_n),
+        .s_axi_lite       (s_axi_lite),
+        .hw_trigger       (hw_trigger),
+        .grid_dim_x       (grid_dim_x),
+        .grid_dim_y       (grid_dim_y),
+        .block_dim_x      (block_dim_x),
+        .block_dim_y      (block_dim_y),
+        .src_addr         (src_addr),
+        .dst_addr         (dst_addr),
+        .iram_we          (iram_we_reg),
+        .iram_waddr       (iram_waddr_reg),
+        .iram_wdata       (iram_wdata_reg),
+        .grid_done_status (grid_done_status)
+    );
 
     // 2. Dynamic Thread Block Scheduler (TBS / GigaThread Engine)
     wire [(NUM_SMS*5)-1:0] sm_available_warp_slots;
