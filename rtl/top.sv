@@ -539,6 +539,7 @@ module top (
     // Buffer the 200MHz differential clock manually so it can be shared
     wire sys_clk_200m_raw;
     wire clk_ref_200m_bufg;
+    wire mig_calib_done;
     
     IBUFGDS u_ibufgds_ddr3 (
         .I (sys_clk_p),
@@ -576,7 +577,7 @@ module top (
         .ui_clk (ui_clk),
         .ui_clk_sync_rst(ui_clk_sync_rst),
         .aresetn (ui_clk_aresetn),
-        .init_calib_complete(),
+        .init_calib_complete(mig_calib_done),
 
         // Tie off unused Memory Controller App signals
         .app_sr_req (1'b0),
@@ -685,9 +686,9 @@ module top (
 
     // LED Status Indicators
     // Active-low LEDs: Outputting 0 turns the LED ON.
-    assign led1 = ~user_lnk_up;         // PCIe Link Status (ON = Link Up)
-    assign led2 = ~rv_reset_n;          // CPU Running Status (ON = CPU Running / Out of Reset)
-    assign led3 = ~rv_trap;             // CPU Trap Status (ON = CPU Halted/Trapped due to exception)
-    assign led4 = ~rv_irq;              // CPU IRQ Pulse (Flashes briefly when IRQ triggers)
+    assign led1 = ~rv_trap;             // LED1: CPU Trap Status (ON = RISC-V Trapped/Exception)
+    assign led2 = ~mig_calib_done;      // LED2: DDR3 Calibration (ON = MIG Calibrated & Ready, OFF = Calib Failed)
+    assign led3 = ~(cdc_mig_axi.awready | cdc_mig_axi.arready); // LED3: MIG AXI Slave Ready (ON = MIG accepting AXI transactions, OFF = MIG stalling AXI)
+    assign led4 = ~(xdma_dwconv_axi.awvalid | xdma_dwconv_axi.arvalid); // LED4: DMA AXI Master Request (ON/Flashes = Host DMA requesting transfer)
 
 endmodule
