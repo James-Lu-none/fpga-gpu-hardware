@@ -632,6 +632,10 @@ module top (
     assign fb_we = 1'b0;
     assign fb_addr = 19'd0;
     assign fb_rgb = 24'd0;
+    // --- RISC-V Debug Signals ---
+    wire rv_reset_n;
+    wire rv_trap;
+    wire rv_irq;
 
     gpu_top u_gpu_top (
         .clk (axi_aclk),
@@ -641,7 +645,10 @@ module top (
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
         .uart_rxd (uart_rxd),
-        .uart_txd (uart_txd)
+        .uart_txd (uart_txd),
+        .rv_reset_n  (rv_reset_n),
+        .rv_trap     (rv_trap),
+        .rv_irq      (rv_irq)
     );
 
     // 8. Framebuffer & HDMI Display Pipeline Instances
@@ -677,9 +684,10 @@ module top (
     );
 
     // LED Status Indicators
-    assign led1 = ~user_lnk_up;         // PCIe Link Status (active-low LED)
-    assign led2 = ~hdmi_init_done;      // HDMI I2C Init Status (active-low LED)
-    assign led3 = ~combined_rst_n;      // System Reset Status (active-low LED)
-    assign led4 = ~usr_irq_req;         // Interrupt Status (active-low LED)
+    // Active-low LEDs: Outputting 0 turns the LED ON.
+    assign led1 = ~user_lnk_up;         // PCIe Link Status (ON = Link Up)
+    assign led2 = ~rv_reset_n;          // CPU Running Status (ON = CPU Running / Out of Reset)
+    assign led3 = ~rv_trap;             // CPU Trap Status (ON = CPU Halted/Trapped due to exception)
+    assign led4 = ~rv_irq;              // CPU IRQ Pulse (Flashes briefly when IRQ triggers)
 
 endmodule
