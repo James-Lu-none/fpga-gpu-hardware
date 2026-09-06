@@ -287,7 +287,7 @@ module gpu_top (
     assign usr_irq_req = irq_req_reg;
 
     // 2. Graphics Processing Cluster (Compute Plane)
-    processing_cluster u_gpc (
+    gpc_top u_gpc (
         .clk (clk),
         .rst_n (sys_rst_n),
         .s_axi_lite (rv_gpu_axil),

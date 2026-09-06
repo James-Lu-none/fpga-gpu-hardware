@@ -4,7 +4,7 @@
 
 import gpu_pkg::*;
 
-module processing_cluster (
+module gpc_top (
     input wire clk,
     input wire rst_n,
 
