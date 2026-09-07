@@ -623,10 +623,10 @@ module top (
     assign fb_we = 1'b0;
     assign fb_addr = 19'd0;
     assign fb_rgb = 24'd0;
-    // --- RISC-V Debug Signals ---
-    wire rv_reset_n;
-    wire rv_trap;
-    wire rv_irq;
+    // --- GPU Status & Activity Signals ---
+    wire gpu_bram_act;
+    wire gpu_l2_act;
+    wire gpu_gpc_busy;
 
     gpu_top u_gpu_top (
         .clk (axi_aclk),
@@ -639,7 +639,10 @@ module top (
         .uart_txd (uart_txd),
         .rv_reset_n  (rv_reset_n),
         .rv_trap     (rv_trap),
-        .rv_irq      (rv_irq)
+        .rv_irq      (rv_irq),
+        .bram_act    (gpu_bram_act),
+        .l2_act      (gpu_l2_act),
+        .gpc_busy    (gpu_gpc_busy)
     );
 
     // 8. Framebuffer & HDMI Display Pipeline Instances
@@ -674,11 +677,49 @@ module top (
         .hdmi_init_done (hdmi_init_done)
     );
 
+    // Activity Pulse Stretchers (Stretch high-speed ns pulses to ~40ms for human vision)
+    localparam STRETCH_CYCLES = 23'd5_000_000; // ~40ms at 125MHz axi_aclk
+
+    // Raw Activity Detection Pulses
+    wire bram_pulse = gpu_bram_act;
+    wire ddr3_pulse = (cdc_mig_axi.awvalid & cdc_mig_axi.awready) |
+                      (cdc_mig_axi.arvalid & cdc_mig_axi.arready);
+    wire l2_pulse   = gpu_l2_act;
+
+    reg [22:0] bram_timer = 23'd0;
+    reg [22:0] ddr3_timer = 23'd0;
+    reg [22:0] l2_timer   = 23'd0;
+
+    always_ff @(posedge axi_aclk or negedge axi_aresetn) begin
+        if (!axi_aresetn) begin
+            bram_timer <= 23'd0;
+            ddr3_timer <= 23'd0;
+            l2_timer   <= 23'd0;
+        end else begin
+            // BRAM Timer
+            if (bram_pulse)
+                bram_timer <= STRETCH_CYCLES;
+            else if (bram_timer != 23'd0)
+                bram_timer <= bram_timer - 1'b1;
+
+            // DDR3 Timer
+            if (ddr3_pulse)
+                ddr3_timer <= STRETCH_CYCLES;
+            else if (ddr3_timer != 23'd0)
+                ddr3_timer <= ddr3_timer - 1'b1;
+
+            // L2 Cache Timer
+            if (l2_pulse)
+                l2_timer <= STRETCH_CYCLES;
+            else if (l2_timer != 23'd0)
+                l2_timer <= l2_timer - 1'b1;
+        end
+    end
+
     // LED Status Indicators
     // Active-low LEDs: Outputting 0 turns the LED ON.
-    assign led1 = ~rv_trap;             // LED1: CPU Trap Status (ON = RISC-V Trapped/Exception)
-    assign led2 = ~mig_calib_done;      // LED2: DDR3 Calibration (ON = MIG Calibrated & Ready, OFF = Calib Failed)
-    assign led3 = ~(cdc_mig_axi.awready | cdc_mig_axi.arready); // LED3: MIG AXI Slave Ready (ON = MIG accepting AXI transactions, OFF = MIG stalling AXI)
-    assign led4 = ~(xdma_dwconv_axi.awvalid | xdma_dwconv_axi.arvalid); // LED4: DMA AXI Master Request (ON/Flashes = Host DMA requesting transfer)
-
+    assign led1 = ~(bram_timer != 23'd0); // LED1: BRAM Read/Write Activity (Flashes upon BRAM access)
+    assign led2 = ~(ddr3_timer != 23'd0); // LED2: DDR3 Read/Write Activity (Flashes upon DDR3 access)
+    assign led3 = ~(l2_timer   != 23'd0); // LED3: L2 Cache Read/Write Activity (Flashes upon L2 hit/miss/refill)
+    assign led4 = ~gpu_gpc_busy;          // LED4: GPC Compute Activity (Solid ON when Compute Task running, OFF when idle)
 endmodule

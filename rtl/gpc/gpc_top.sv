@@ -12,7 +12,11 @@ module gpc_top (
     axi_lite_if.slave s_axi_lite,
 
     // 256-bit AXI4-Full Master Interface (To Global Memory Crossbar)
-    axi4_if.master m_axi_gmem
+    axi4_if.master m_axi_gmem,
+
+    // Status Activity Outputs
+    output wire gpc_busy,
+    output wire l2_act
 );
 
     // Reset Pipeline (Level 1)
@@ -76,7 +80,8 @@ module gpc_top (
         .sm_block_issue_valid (sm_block_issue_valid),
         .sm_block_idx_x (sm_block_idx_x),
         .sm_block_idx_y (sm_block_idx_y),
-        .sm_warps_per_block (sm_warps_per_block)
+        .sm_warps_per_block (sm_warps_per_block),
+        .busy (gpc_busy)
     );
 
     // 3. SM Array & AXI Arbiter (NUM_SMS = 2)
@@ -207,5 +212,11 @@ module gpc_top (
         .m_axi_rlast (m_axi_gmem.rlast),
         .m_axi_rready (m_axi_gmem.rready)
     );
+
+    // L2 Cache Activity: Any L1-to-L2 request or L2-to-DDR3 AXI handshake
+    assign l2_act = (sm0_l1_req_valid & sm0_l1_req_ready) |
+                    (sm1_l1_req_valid & sm1_l1_req_ready) |
+                    (m_axi_gmem.awvalid & m_axi_gmem.awready) |
+                    (m_axi_gmem.arvalid & m_axi_gmem.arready);
 
 endmodule

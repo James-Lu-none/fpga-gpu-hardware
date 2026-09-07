@@ -26,7 +26,12 @@ module gpu_top (
     // RISC-V Debug Status
     output wire rv_reset_n,
     output wire rv_trap,
-    output wire rv_irq
+    output wire rv_irq,
+
+    // Status Activity Outputs
+    output wire bram_act,
+    output wire l2_act,
+    output wire gpc_busy
 );
 
     // Reset Synchronizer to resolve high fanout / recovery time violations
@@ -286,12 +291,18 @@ module gpu_top (
 
     assign usr_irq_req = irq_req_reg;
 
+    // BRAM Activity: Any valid transaction from Host XDMA or RISC-V into BRAM
+    assign bram_act = (bram_axi.awvalid & bram_axi.awready) |
+                      (bram_axi.arvalid & bram_axi.arready);
+
     // 2. Graphics Processing Cluster (Compute Plane)
     gpc_top u_gpc (
         .clk (clk),
         .rst_n (sys_rst_n),
         .s_axi_lite (rv_gpu_axil),
-        .m_axi_gmem (m_axi_gmem)
+        .m_axi_gmem (m_axi_gmem),
+        .gpc_busy (gpc_busy),
+        .l2_act (l2_act)
     );
 
 endmodule

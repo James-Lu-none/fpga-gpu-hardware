@@ -26,8 +26,11 @@ module thread_block_scheduler (
     output reg [NUM_SMS-1:0] sm_block_issue_valid,
     output reg [15:0] sm_block_idx_x,
     output reg [15:0] sm_block_idx_y,
-    output reg [9:0] sm_warps_per_block
+    output reg [9:0] sm_warps_per_block,
+    output wire busy
 );
+
+    assign busy = (state != STATE_IDLE);
 
     // Unpack available warp slots for easier access
     wire [4:0] sm_slots [0:NUM_SMS-1];
