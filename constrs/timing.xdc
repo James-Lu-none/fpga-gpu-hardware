@@ -5,15 +5,10 @@
 # otherwise we will get critical warning like:
 # [Timing 38-472] The REFCLK pin of IDELAYCTRL u_mig_ddr3/u_mig_7series_0_mig/u_iodelay_ctrl/u_idelayctrl_200 is not reached by any clock but IDELAYE2 u_mig_ddr3/u_mig_7series_0_mig/u_memc_ui_top_axi/mem_intfc0/ddr_phy_top0/u_ddr_mc_phy_wrapper/u_ddr_mc_phy/ddr_phy_4lanes_0.u_ddr_phy_4lanes/ddr_byte_lane_A.ddr_byte_lane_A/ddr_byte_group_io/input_[0].iserdes_dq_.idelay_dq.idelaye2 has REFCLK_FREQUENCY of 200.000 Mhz (period 5.000 ns). The IDELAYCTRL REFCLK pin frequency must match the IDELAYE2 REFCLK_FREQUENCY property value.
 
-# Positive Clock Pin (Primary Constraints)
-set_property PACKAGE_PIN R4 [get_ports sys_clk_p]
-set_property IOSTANDARD DIFF_SSTL15 [get_ports sys_clk_p]
-
-# Negative Clock Pin (Location Only, Inherits IOSTANDARD and DIFF_TERM)
-set_property PACKAGE_PIN T4 [get_ports sys_clk_n]
-
-
-create_clock -period 5.000 -name ddr3_sys_clk [get_ports sys_clk_p]
+# set_property PACKAGE_PIN R4 [get_ports sys_clk_p]
+# set_property IOSTANDARD DIFF_SSTL15 [get_ports sys_clk_p]
+# set_property PACKAGE_PIN T4 [get_ports sys_clk_n]
+# create_clock -period 5.000 -name ddr3_sys_clk [get_ports sys_clk_p]
 
 # -------------------------------------------------------------------------
 # Asynchronous Clock Domain Crossing (CDC) Timing Constraints
