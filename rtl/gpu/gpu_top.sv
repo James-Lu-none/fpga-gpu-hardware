@@ -291,9 +291,9 @@ module gpu_top (
 
     assign usr_irq_req = irq_req_reg;
 
-    // BRAM Activity: Any valid transaction from Host XDMA or RISC-V into BRAM
-    assign bram_act = (bram_axi.awvalid & bram_axi.awready) |
-                      (bram_axi.arvalid & bram_axi.arready);
+    // Host / Mailbox Activity: Tracks Host PCIe XDMA transactions (prevents continuous PicoRV32 instruction fetches from keeping LED permanently ON)
+    assign bram_act = (s_axi_lite.awvalid & s_axi_lite.awready) |
+                      (s_axi_lite.arvalid & s_axi_lite.arready);
 
     // 2. Graphics Processing Cluster (Compute Plane)
     gpc_top u_gpc (

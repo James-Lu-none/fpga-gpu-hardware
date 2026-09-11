@@ -178,8 +178,7 @@ module gpc_top #(
     );
 
     // L2 Cache Activity: Any L1-to-L2 request or L2-to-DDR3 AXI handshake
-    assign l2_act = (sm0_l1_req_valid & sm0_l1_req_ready) |
-                    (sm1_l1_req_valid & sm1_l1_req_ready) |
+    assign l2_act = (|sm_l1_req_valid) |
                     (m_axi_gmem.awvalid & m_axi_gmem.awready) |
                     (m_axi_gmem.arvalid & m_axi_gmem.arready);
 

@@ -718,7 +718,7 @@ module top (
 
     // LED Status Indicators
     // Active-low LEDs: Outputting 0 turns the LED ON.
-    assign led1 = ~(bram_timer != 23'd0); // LED1: BRAM Read/Write Activity (Flashes upon BRAM access)
+    assign led1 = ~(bram_timer != 23'd0); // LED1: Host PCIe / Mailbox Activity (Flashes upon Host task submission)
     assign led2 = ~(ddr3_timer != 23'd0); // LED2: DDR3 Read/Write Activity (Flashes upon DDR3 access)
     assign led3 = ~(l2_timer   != 23'd0); // LED3: L2 Cache Read/Write Activity (Flashes upon L2 hit/miss/refill)
     assign led4 = ~gpu_gpc_busy;          // LED4: GPC Compute Activity (Solid ON when Compute Task running, OFF when idle)
