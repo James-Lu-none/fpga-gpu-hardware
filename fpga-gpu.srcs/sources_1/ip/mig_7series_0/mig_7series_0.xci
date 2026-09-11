@@ -1548,8 +1548,8 @@
           "abstraction_type": "xilinx.com:interface:diff_clock_rtl:1.0",
           "mode": "slave",
           "parameters": {
-            "CAN_DEBUG": [ { "value": "false", "resolve_type": "generated", "format": "bool", "is_static_object": false } ],
-            "FREQ_HZ": [ { "value": "100000000", "resolve_type": "generated", "format": "long", "is_static_object": false } ]
+            "CAN_DEBUG": [ { "value": "false", "resolve_type": "generated", "format": "bool", "is_ips_inferred": true, "is_static_object": false } ],
+            "FREQ_HZ": [ { "value": "100000000", "resolve_type": "generated", "format": "long", "is_ips_inferred": true, "is_static_object": false } ]
           },
           "port_maps": {
             "CLK_P": [ { "physical_name": "sys_clk_p" } ],
@@ -1655,5 +1655,5 @@
       }
     }
   },
-  "checksum": "4afff735"
+  "checksum": "ebad771d"
 }
