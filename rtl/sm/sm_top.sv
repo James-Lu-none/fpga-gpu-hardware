@@ -63,6 +63,16 @@ module streaming_multiprocessor #(
 
     warp_alloc_if alloc [0:NUM_SPS-1]();
 
+    // Unpack interface signals to regular logic arrays
+    // since interface array is not allow to use runtime value as index
+    wire [4:0]         sp_avail_slots [0:NUM_SPS-1];
+    wire [NUM_SPS-1:0] sp_alloc_ready;
+
+    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_unpack
+        assign sp_avail_slots[s] = alloc[s].available_slots;
+        assign sp_alloc_ready[s] = alloc[s].ready;
+    end
+
     // Target Sub-Partition selection (select sp that has most free warp slots)
     wire [$clog2(NUM_SPS)-1:0] alloc_target_sp;
     wire [4:0] max_free_slots;
@@ -70,7 +80,7 @@ module streaming_multiprocessor #(
     generate
         if (NUM_SPS == 1) begin : gen_alloc_target_single
             assign alloc_target_sp = '0;
-            assign max_free_slots  = alloc[0].available_slots;
+            assign max_free_slots  = sp_avail_slots[0];
         end else begin : gen_alloc_target_multi
             reg [$clog2(NUM_SPS)-1:0] target_sp_reg;
             reg [4:0]                 max_slots_reg;
@@ -79,8 +89,8 @@ module streaming_multiprocessor #(
                 target_sp_reg = '0;
                 max_slots_reg = 5'd0;
                 for (int s = 0; s < NUM_SPS; s = s + 1) begin
-                    if (alloc[s].available_slots > max_slots_reg) begin
-                        max_slots_reg = alloc[s].available_slots;
+                    if (sp_avail_slots[s] > max_slots_reg) begin
+                        max_slots_reg = sp_avail_slots[s];
                         target_sp_reg = s[$clog2(NUM_SPS)-1:0];
                     end
                 end
@@ -92,7 +102,7 @@ module streaming_multiprocessor #(
     endgenerate
 
     assign available_warp_slots = max_free_slots;
-    wire alloc_ready = alloc[alloc_target_sp].ready;
+    wire alloc_ready = sp_alloc_ready[alloc_target_sp];
 
     reg alloc_valid_reg;
     reg block_accepted_reg;
