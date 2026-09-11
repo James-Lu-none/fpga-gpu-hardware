@@ -20,11 +20,11 @@ module sub_partition (
     // L1 Cache Interface (To SM Global L1 Cache)
     output wire l1_req_valid,
     output wire [31:0] l1_req_addr,
-    output wire [63:0] l1_req_wdata,
+    output wire [DATA_W-1:0] l1_req_wdata,
     output wire l1_req_we,
     input wire l1_req_ready,
     input wire l1_rsp_valid,
-    input wire [63:0] l1_rsp_rdata
+    input wire [DATA_W-1:0] l1_rsp_rdata
 );
 
     // Reset Pipeline (Level 3)
@@ -94,38 +94,104 @@ module sub_partition (
         .wb (wb)
     );
 
-    // 4. ALU & PC (Execution & Control)
-    wire alu_updates_nzp;
-    wire [2:0] next_nzp0;
-    wire [2:0] next_nzp1;
-    wire is_exit;
-    wire is_branch;
-    wire is_sync;
+    // 4. ALU & PC Execution Pipeline
+    localparam OP_ADD  = 8'h01;
+    localparam OP_SUB  = 8'h02;
+    localparam OP_MUL  = 8'h03;
+    localparam OP_CMP  = 8'h04;
+    localparam OP_ADDI = 8'h81;
+    localparam OP_S2R  = 8'hB0;
+    localparam OP_BR   = 8'hC0;
+    localparam OP_SYNC = 8'hE0;
+    localparam OP_EXIT = 8'hFF;
 
-    alu_int32 u_alu_int32 (
-        .clk (clk),
-        .rst_n (core_rst_n),
-        .op (op),
-        .wb (alu_wb),
-        .alu_updates_nzp (alu_updates_nzp),
-        .next_nzp0 (next_nzp0),
-        .next_nzp1 (next_nzp1),
-        .is_exit (is_exit),
-        .is_branch (is_branch),
-        .is_sync (is_sync)
-    );
+    // Warp-level EX1 Stage Registers
+    reg ex1_valid;
+    reg [7:0] ex1_opcode;
+    reg [$clog2(MAX_WARPS)-1:0] ex1_warp_id;
+    reg [4:0] ex1_rd;
 
+    always @(posedge clk or negedge core_rst_n) begin
+        if (!core_rst_n) begin
+            ex1_valid   <= 1'b0;
+            ex1_opcode  <= 8'd0;
+            ex1_warp_id <= '0;
+            ex1_rd      <= 5'd0;
+        end else begin
+            ex1_valid   <= op.valid;
+            ex1_opcode  <= op.opcode;
+            ex1_warp_id <= op.warp_id;
+            ex1_rd      <= op.rd;
+        end
+    end
+
+    wire alu_updates_nzp = ex1_valid && (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_CMP);
+    wire is_exit   = ex1_valid && (ex1_opcode == OP_EXIT);
+    wire is_branch = ex1_valid && (ex1_opcode == OP_BR);
+    wire is_sync   = ex1_valid && (ex1_opcode == OP_SYNC);
+    wire alu_writes_reg = (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_MUL || ex1_opcode == OP_S2R);
+
+    // Generate K ALU Lanes
+    wire [31:0] lane_result [0:NUM_LANES-1];
+    wire [2:0]  lane_nzp    [0:NUM_LANES-1];
+
+    for (genvar k = 0; k < NUM_LANES; k = k + 1) begin : gen_alu_lanes
+        wire [31:0] lane_rs1 = op.rs1_data[k*32 +: 32];
+        wire [31:0] lane_rs2 = op.is_imm ? op.imm : op.rs2_data[k*32 +: 32];
+
+        alu_int32 #(
+            .LANE_INDEX (k)
+        ) u_alu_int32 (
+            .clk             (clk),
+            .rst_n           (core_rst_n),
+            .valid           (op.valid),
+            .opcode          (op.opcode),
+            .imm             (op.imm),
+            .rs1_data        (lane_rs1),
+            .rs2_data        (lane_rs2),
+            .lane_id         (5'(k)),
+            .thread_id_start (op.thread_id_start),
+            .block_idx_x     (op.block_idx_x),
+            .block_idx_y     (op.block_idx_y),
+            .result          (lane_result[k]),
+            .next_nzp        (lane_nzp[k])
+        );
+    end
+
+    // EX3 Stage: Vector Write-Back Assembly
+    always @(posedge clk or negedge core_rst_n) begin
+        if (!core_rst_n) begin
+            alu_wb.valid   <= 1'b0;
+            alu_wb.warp_id <= '0;
+            alu_wb.rd      <= 5'd0;
+            alu_wb.data    <= '0;
+            alu_wb.mask    <= 32'd0;
+        end else begin
+            alu_wb.valid <= 1'b0;
+            if (ex1_valid && alu_writes_reg && (ex1_rd != 5'd0)) begin
+                alu_wb.valid   <= 1'b1;
+                alu_wb.warp_id <= ex1_warp_id;
+                alu_wb.rd      <= ex1_rd;
+                alu_wb.mask    <= 32'hFFFFFFFF;
+                for (int k = 0; k < NUM_LANES; k = k + 1) begin
+                    alu_wb.data[k*32 +: 32] <= lane_result[k];
+                end
+            end
+        end
+    end
+
+    // PC Module Instantiation
     pc u_pc (
-        .clk (clk),
-        .rst_n (core_rst_n),
-        .op (op),
+        .clk             (clk),
+        .rst_n           (core_rst_n),
+        .op              (op),
         .alu_updates_nzp (alu_updates_nzp),
-        .next_nzp0 (next_nzp0),
-        .next_nzp1 (next_nzp1),
-        .is_exit (is_exit),
-        .is_branch (is_branch),
-        .is_sync (is_sync),
-        .ctx_wb (ctx_alu_wb)
+        .next_nzp0       (lane_nzp[0]),
+        .next_nzp1       ((NUM_LANES > 1) ? lane_nzp[1] : 3'b000),
+        .is_exit         (is_exit),
+        .is_branch       (is_branch),
+        .is_sync         (is_sync),
+        .ctx_wb          (ctx_alu_wb)
     );
 
     // 5. Load/Store Unit (LSU)

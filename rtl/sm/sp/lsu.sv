@@ -20,12 +20,12 @@ module lsu (
     // L1 Cache Interface
     output reg l1_req_valid,
     output reg [31:0] l1_req_addr,
-    output reg [63:0] l1_req_wdata,
+    output reg [DATA_W-1:0] l1_req_wdata,
     output reg l1_req_we,
     input wire l1_req_ready,
 
     input wire l1_rsp_valid,
-    input wire [63:0] l1_rsp_rdata,
+    input wire [DATA_W-1:0] l1_rsp_rdata,
 
     // Write-Back Interface (To VRF and Context Scheduler)
     wb_if.master wb,
