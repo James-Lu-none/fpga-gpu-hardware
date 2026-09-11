@@ -31,6 +31,7 @@ module gpc_top #(
     wire [15:0] grid_dim_x, grid_dim_y;
     wire [15:0] block_dim_x, block_dim_y;
     wire        hw_trigger;
+    wire        cache_flush;
     
     // Broadcast I-RAM Signals to all SMs
     wire        iram_we_reg;
@@ -44,6 +45,7 @@ module gpc_top #(
         .rst_n            (gpc_rst_n),
         .s_axi_lite       (s_axi_lite),
         .hw_trigger       (hw_trigger),
+        .cache_flush      (cache_flush),
         .grid_dim_x       (grid_dim_x),
         .grid_dim_y       (grid_dim_y),
         .block_dim_x      (block_dim_x),
@@ -101,6 +103,7 @@ module gpc_top #(
         ) u_sm (
             .clk                  (clk),
             .rst_n                (gpc_rst_n),
+            .flush                (cache_flush),
             .block_issue_valid    (sm_block_issue_valid[n]),
             .block_idx_x          (sm_block_idx_x),
             .block_idx_y          (sm_block_idx_y),
@@ -129,6 +132,7 @@ module gpc_top #(
     ) u_l2_cache (
         .clk             (clk),
         .rst_n           (gpc_rst_n),
+        .flush           (cache_flush),
         
         .sm_req_valid    (sm_l1_req_valid),
         .sm_req_addr     (sm_l1_req_addr),

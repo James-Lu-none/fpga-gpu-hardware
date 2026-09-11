@@ -10,6 +10,7 @@ module l2_cache #(
 )(
     input wire clk,
     input wire rst_n,
+    input wire flush,
 
     // Vectorized L1 Cache Interfaces (From NUM_PORTS SMs)
     input  wire [NUM_PORTS-1:0] sm_req_valid,
@@ -74,7 +75,7 @@ module l2_cache #(
     wire [8:0]  req_index = req_addr[13:5];
     
     (* ram_style = "block" *) reg [17:0] tag_ram [0:NUM_LINES-1];
-    (* ram_style = "block" *) reg valid_ram [0:NUM_LINES-1];
+    reg valid_ram [0:NUM_LINES-1];
 
     reg [17:0] tag_ram_dout;
     reg valid_ram_dout;
@@ -131,11 +132,26 @@ module l2_cache #(
             tag_ram[ram_addr] <= tag_ram_wdata;
         end
         tag_ram_dout <= tag_ram[ram_addr];
+    end
 
-        if (valid_ram_we) begin
-            valid_ram[ram_addr] <= valid_ram_wdata;
+    // Valid RAM (Distributed registers allowing 1-cycle global flush)
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (int i = 0; i < NUM_LINES; i = i + 1) begin
+                valid_ram[i] <= 1'b0;
+            end
+            valid_ram_dout <= 1'b0;
+        end else if (flush) begin
+            for (int i = 0; i < NUM_LINES; i = i + 1) begin
+                valid_ram[i] <= 1'b0;
+            end
+            valid_ram_dout <= 1'b0;
+        end else begin
+            if (valid_ram_we) begin
+                valid_ram[ram_addr] <= valid_ram_wdata;
+            end
+            valid_ram_dout <= valid_ram[ram_addr];
         end
-        valid_ram_dout <= valid_ram[ram_addr];
     end
 
     function [PORT_SEL_W-1:0] next_port(input [PORT_SEL_W-1:0] curr);

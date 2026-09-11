@@ -11,6 +11,7 @@ module streaming_multiprocessor #(
 )(
     input wire clk,
     input wire rst_n,
+    input wire flush,
 
     // TBS Dispatch Interface (From GPC)
     input wire block_issue_valid,
@@ -222,6 +223,7 @@ module streaming_multiprocessor #(
     l1_cache u_l1_cache (
         .clk (clk),
         .rst_n (sm_rst_n),
+        .flush (flush),
         
         .req_valid (l1_req_valid_int),
         .req_addr (l1_req_addr_int),

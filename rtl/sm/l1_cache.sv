@@ -8,6 +8,7 @@ import gpu_pkg::*;
 module l1_cache (
     input wire clk,
     input wire rst_n,
+    input wire flush,
 
     // LSU Interface (Simple Handshake)
     input wire req_valid,
@@ -94,6 +95,13 @@ module l1_cache (
             rsp_valid <= 1'b0;
             l2_req_valid <= 1'b0;
             l2_req_we <= 1'b0;
+            for (int i = 0; i < NUM_LINES; i = i + 1) begin
+                valid_ram[i] <= 1'b0;
+            end
+        end else if (flush) begin
+            for (int i = 0; i < NUM_LINES; i = i + 1) begin
+                valid_ram[i] <= 1'b0;
+            end
         end else begin
             // Default de-asserts
             rsp_valid <= 1'b0;

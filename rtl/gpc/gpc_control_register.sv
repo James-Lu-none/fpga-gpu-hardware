@@ -12,6 +12,7 @@ module gpc_control_register (
 
     // Control Registers & Launch Pulse
     output reg        hw_trigger,
+    output reg        cache_flush,
     output reg [15:0] grid_dim_x,
     output reg [15:0] grid_dim_y,
     output reg [15:0] block_dim_x,
@@ -74,6 +75,7 @@ module gpc_control_register (
             latched_wstrb  <= 4'd0;
 
             hw_trigger    <= 1'b0;
+            cache_flush   <= 1'b0;
             grid_done_reg <= 1'b0;
             grid_dim_x    <= 16'd1;
             grid_dim_y    <= 16'd1;
@@ -87,8 +89,9 @@ module gpc_control_register (
             iram_wdata    <= 32'd0;
         end else begin
             // 1-cycle auto-clearing pulses
-            hw_trigger <= 1'b0;
-            iram_we    <= 1'b0;
+            hw_trigger  <= 1'b0;
+            cache_flush <= 1'b0;
+            iram_we     <= 1'b0;
 
             // Hardware completion flag from scheduler
             if (grid_done_status) begin
@@ -133,7 +136,11 @@ module gpc_control_register (
                 end else begin
                     // 0x0000 ~ 0x0FFF: Control Registers
                     case (latched_awaddr[7:0])
-                        8'h00: hw_trigger    <= latched_wdata[0];
+                        8'h00: begin
+                            hw_trigger  <= latched_wdata[0];
+                            // Auto-flush on kernel launch (bit 0) or explicit flush bit (bit 1)
+                            cache_flush <= latched_wdata[0] | latched_wdata[1];
+                        end
                         8'h08: grid_done_reg <= 1'b0; // INT_ACK clears done flag
                         8'h0C: grid_dim_x    <= latched_wdata[15:0];
                         8'h10: grid_dim_y    <= latched_wdata[15:0];
@@ -141,6 +148,7 @@ module gpc_control_register (
                         8'h18: block_dim_y   <= latched_wdata[15:0];
                         8'h20: src_addr      <= latched_wdata;
                         8'h24: dst_addr      <= latched_wdata;
+                        8'h28: cache_flush   <= 1'b1; // Explicit cache invalidate register
                         default: ;
                     endcase
                 end
