@@ -75,8 +75,8 @@ interface operand_if;
     logic [31:0] imm;
     logic is_imm;
     
-    logic [63:0] rs1_data;
-    logic [63:0] rs2_data;
+    logic [DATA_W-1:0] rs1_data;
+    logic [DATA_W-1:0] rs2_data;
     
     modport master (
         output valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start,
@@ -92,7 +92,7 @@ interface wb_if;
     logic valid;
     logic [$clog2(MAX_WARPS)-1:0] warp_id;
     logic [4:0] rd;
-    logic [63:0] data;
+    logic [DATA_W-1:0] data;
     logic [31:0] mask;
     
     modport master (output valid, warp_id, rd, data, mask);
