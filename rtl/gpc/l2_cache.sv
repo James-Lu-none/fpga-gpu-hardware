@@ -1,30 +1,25 @@
 `timescale 1ns / 1ps
 // GPC L2 Shared Cache & AXI4 Master
-// Services L1 misses from multiple SMs and interfaces with DDR3 via AXI4.
+// Services L1 misses from NUM_PORTS SMs and interfaces with DDR3 via AXI4.
 // Capacity: 16KB (512 lines x 32 Bytes) Direct Mapped, Write-Through
 
-module l2_cache (
+import gpu_pkg::*;
+
+module l2_cache #(
+    parameter NUM_PORTS = gpu_pkg::NUM_SMS
+)(
     input wire clk,
     input wire rst_n,
 
-    // L1 Cache Interfaces (From 2 SMs)
-    input wire sm0_req_valid,
-    input wire [31:0] sm0_req_addr,
-    input wire [255:0]sm0_req_wdata,
-    input wire [31:0] sm0_req_wstrb,
-    input wire sm0_req_we,
-    output wire sm0_req_ready,
-    output reg sm0_rsp_valid,
-    output reg [255:0]sm0_rsp_rdata,
-
-    input wire sm1_req_valid,
-    input wire [31:0] sm1_req_addr,
-    input wire [255:0]sm1_req_wdata,
-    input wire [31:0] sm1_req_wstrb,
-    input wire sm1_req_we,
-    output wire sm1_req_ready,
-    output reg sm1_rsp_valid,
-    output reg [255:0]sm1_rsp_rdata,
+    // Vectorized L1 Cache Interfaces (From NUM_PORTS SMs)
+    input  wire [NUM_PORTS-1:0] sm_req_valid,
+    input  wire [31:0] sm_req_addr  [0:NUM_PORTS-1],
+    input  wire [255:0] sm_req_wdata [0:NUM_PORTS-1],
+    input  wire [31:0] sm_req_wstrb [0:NUM_PORTS-1],
+    input  wire [NUM_PORTS-1:0] sm_req_we,
+    output wire [NUM_PORTS-1:0] sm_req_ready,
+    output reg  [NUM_PORTS-1:0] sm_rsp_valid,
+    output reg  [255:0] sm_rsp_rdata [0:NUM_PORTS-1],
 
     // AXI4-Full Master Interface (To DDR3)
     output reg m_axi_awvalid,
@@ -57,24 +52,26 @@ module l2_cache (
 );
 
     // Round-Robin Arbiter for L1 Requests
-    reg current_sm; // 0 = SM0, 1 = SM1
-    
-    wire req_valid = (current_sm == 0) ? sm0_req_valid : sm1_req_valid;
-    wire [31:0] req_addr = (current_sm == 0) ? sm0_req_addr : sm1_req_addr;
-    wire [255:0]req_wdata = (current_sm == 0) ? sm0_req_wdata : sm1_req_wdata;
-    wire [31:0] req_wstrb = (current_sm == 0) ? sm0_req_wstrb : sm1_req_wstrb;
-    wire req_we = (current_sm == 0) ? sm0_req_we : sm1_req_we;
-    
+    localparam PORT_SEL_W = (NUM_PORTS > 1) ? $clog2(NUM_PORTS) : 1;
+    reg [PORT_SEL_W-1:0] current_sm;
+
+    wire req_valid = sm_req_valid[current_sm];
+    wire [31:0] req_addr  = sm_req_addr[current_sm];
+    wire [255:0]req_wdata = sm_req_wdata[current_sm];
+    wire [31:0] req_wstrb = sm_req_wstrb[current_sm];
+    wire req_we    = sm_req_we[current_sm];
+
     reg req_ready_internal;
-    assign sm0_req_ready = (current_sm == 0) ? req_ready_internal : 1'b0;
-    assign sm1_req_ready = (current_sm == 1) ? req_ready_internal : 1'b0;
+    for (genvar p = 0; p < NUM_PORTS; p = p + 1) begin : gen_sm_req_ready
+        assign sm_req_ready[p] = (current_sm == p) ? req_ready_internal : 1'b0;
+    end
 
     // Cache Parameters & Storage
     // 32-bit Address = [31:14] Tag (18 bits) | [13:5] Index (9 bits) | [4:0] Offset (5 bits)
     // 512 lines * 32 Bytes = 16KB
     localparam NUM_LINES = 512;
-    wire [17:0] req_tag = req_addr[31:14];
-    wire [8:0] req_index = req_addr[13:5];
+    wire [17:0] req_tag   = req_addr[31:14];
+    wire [8:0]  req_index = req_addr[13:5];
     
     (* ram_style = "block" *) reg [17:0] tag_ram [0:NUM_LINES-1];
     (* ram_style = "block" *) reg valid_ram [0:NUM_LINES-1];
@@ -90,9 +87,9 @@ module l2_cache (
 
     integer i;
     initial begin
-        for (i=0; i<NUM_LINES; i=i+1) begin
+        for (i = 0; i < NUM_LINES; i = i + 1) begin
             valid_ram[i] = 1'b0;
-            tag_ram[i] = 18'd0;
+            tag_ram[i]   = 18'd0;
         end
     end
 
@@ -103,12 +100,24 @@ module l2_cache (
     reg [255:0] data_ram_wdata;
     
     // Latched request for pipeline
-    reg [31:0] latched_req_addr;
+    reg [31:0]  latched_req_addr;
     reg [255:0] latched_req_wdata;
-    reg [31:0] latched_req_wstrb;
-    reg latched_req_we;
-    reg [17:0] latched_req_tag;
-    reg [8:0] latched_req_index;
+    reg [31:0]  latched_req_wstrb;
+    reg         latched_req_we;
+    reg [17:0]  latched_req_tag;
+    reg [8:0]   latched_req_index;
+
+    // FSM States
+    localparam STATE_IDLE       = 3'd0;
+    localparam STATE_COMPARE    = 3'd1;
+    localparam STATE_HIT_RETURN = 3'd2;
+    localparam STATE_AXI_AR     = 3'd3;
+    localparam STATE_AXI_R      = 3'd4;
+    localparam STATE_AXI_AW     = 3'd5;
+    localparam STATE_AXI_W      = 3'd6;
+    localparam STATE_AXI_B      = 3'd7;
+
+    reg [2:0] state;
 
     wire [8:0] ram_addr = (state == STATE_IDLE) ? req_index : latched_req_index;
 
@@ -122,47 +131,44 @@ module l2_cache (
             tag_ram[ram_addr] <= tag_ram_wdata;
         end
         tag_ram_dout <= tag_ram[ram_addr];
-        
+
         if (valid_ram_we) begin
             valid_ram[ram_addr] <= valid_ram_wdata;
         end
         valid_ram_dout <= valid_ram[ram_addr];
     end
 
-    // FSM
-    localparam STATE_IDLE = 3'd0;
-    localparam STATE_HIT_RETURN = 3'd1;
-    localparam STATE_AXI_AR = 3'd2;
-    localparam STATE_AXI_R = 3'd3;
-    localparam STATE_AXI_AW = 3'd4;
-    localparam STATE_AXI_W = 3'd5;
-    localparam STATE_AXI_B = 3'd6;
-    localparam STATE_COMPARE = 3'd7;
-    
-    reg [2:0] state;
+    function [PORT_SEL_W-1:0] next_port(input [PORT_SEL_W-1:0] curr);
+        if (NUM_PORTS <= 1) return '0;
+        else if (curr == NUM_PORTS - 1) return '0;
+        else return curr + 1'b1;
+    endfunction
 
+    // Controller FSM
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= STATE_IDLE;
-            current_sm <= 1'b0;
             req_ready_internal <= 1'b1;
-            sm0_rsp_valid <= 1'b0;
-            sm1_rsp_valid <= 1'b0;
+            current_sm <= '0;
+            sm_rsp_valid <= '0;
+            for (int p = 0; p < NUM_PORTS; p = p + 1) begin
+                sm_rsp_rdata[p] <= 256'd0;
+            end
             
             m_axi_awvalid <= 1'b0;
             m_axi_wvalid <= 1'b0;
-            m_axi_bready <= 1'b1; // Always ready for B
+            m_axi_bready <= 1'b0;
             m_axi_arvalid <= 1'b0;
             m_axi_rready <= 1'b0;
             
+            data_ram_we <= 1'b0;
             valid_ram_we <= 1'b0;
             tag_ram_we <= 1'b0;
         end else begin
             data_ram_we <= 1'b0;
             valid_ram_we <= 1'b0;
             tag_ram_we <= 1'b0;
-            sm0_rsp_valid <= 1'b0;
-            sm1_rsp_valid <= 1'b0;
+            sm_rsp_valid <= '0;
 
             case (state)
                 STATE_IDLE: begin
@@ -179,9 +185,9 @@ module l2_cache (
                         
                         state <= STATE_COMPARE;
                     end else begin
-                        // Toggle arbiter if current has no request, but the other might
-                        if (!req_valid) begin
-                            current_sm <= ~current_sm;
+                        // Rotate arbiter if current port has no request
+                        if (!req_valid && NUM_PORTS > 1) begin
+                            current_sm <= next_port(current_sm);
                         end
                     end
                 end
@@ -192,9 +198,8 @@ module l2_cache (
                         // L2 HIT
                         if (latched_req_we) begin
                             // Write-Through to DDR3
-                            // Also invalidate L2 on write for simplicity
                             valid_ram_we <= 1'b1;
-                            valid_ram_wdata <= 1'b0;
+                            valid_ram_wdata <= 1'b0; // Invalidate L2 on write
                             
                             m_axi_awvalid <= 1'b1;
                             m_axi_awaddr <= latched_req_addr; // Address is 32-byte aligned from L1
@@ -204,8 +209,6 @@ module l2_cache (
                             state <= STATE_AXI_AW;
                         end else begin
                             // Read Hit
-                            // The BRAM read address was presented in STATE_IDLE/STATE_COMPARE.
-                            // In the next cycle (STATE_HIT_RETURN), data_ram_dout will be valid.
                             state <= STATE_HIT_RETURN;
                         end
                     end else begin
@@ -231,15 +234,10 @@ module l2_cache (
                 end
 
                 STATE_HIT_RETURN: begin
-                    if (current_sm == 0) begin
-                        sm0_rsp_valid <= 1'b1;
-                        sm0_rsp_rdata <= data_ram_dout;
-                    end else begin
-                        sm1_rsp_valid <= 1'b1;
-                        sm1_rsp_rdata <= data_ram_dout;
-                    end
+                    sm_rsp_valid[current_sm] <= 1'b1;
+                    sm_rsp_rdata[current_sm] <= data_ram_dout;
                     req_ready_internal <= 1'b1;
-                    current_sm <= ~current_sm;
+                    if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
                     state <= STATE_IDLE;
                 end
 
@@ -264,16 +262,11 @@ module l2_cache (
                         data_ram_wdata <= m_axi_rdata;
                         
                         // Return to L1
-                        if (current_sm == 0) begin
-                            sm0_rsp_valid <= 1'b1;
-                            sm0_rsp_rdata <= m_axi_rdata;
-                        end else begin
-                            sm1_rsp_valid <= 1'b1;
-                            sm1_rsp_rdata <= m_axi_rdata;
-                        end
+                        sm_rsp_valid[current_sm] <= 1'b1;
+                        sm_rsp_rdata[current_sm] <= m_axi_rdata;
                         
                         req_ready_internal <= 1'b1;
-                        current_sm <= ~current_sm;
+                        if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
                         state <= STATE_IDLE;
                     end
                 end
@@ -299,13 +292,9 @@ module l2_cache (
                 STATE_AXI_B: begin
                     if (m_axi_bvalid && m_axi_bready) begin
                         // Write complete
-                        if (current_sm == 0) begin
-                            sm0_rsp_valid <= 1'b1; // ACK
-                        end else begin
-                            sm1_rsp_valid <= 1'b1;
-                        end
+                        sm_rsp_valid[current_sm] <= 1'b1; // ACK
                         req_ready_internal <= 1'b1;
-                        current_sm <= ~current_sm;
+                        if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
                         state <= STATE_IDLE;
                     end
                 end
