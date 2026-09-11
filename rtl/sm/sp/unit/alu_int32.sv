@@ -9,7 +9,7 @@
 
 import gpu_pkg::*;
 
-module alu (
+module alu_int32 (
     input wire clk,
     input wire rst_n,
 

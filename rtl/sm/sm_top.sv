@@ -69,7 +69,7 @@ module streaming_multiprocessor (
     wire l1_rsp_valid_int;
     wire [63:0] l1_rsp_rdata_int;
 
-    processing_block u_sub_core (
+    sub_partition u_sp_0 (
         .clk (clk),
         .rst_n (sm_rst_n),
         

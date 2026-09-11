@@ -5,7 +5,7 @@
 
 import gpu_pkg::*;
 
-module processing_block (
+module sub_partition (
     input wire clk,
     input wire rst_n,
 
@@ -102,7 +102,7 @@ module processing_block (
     wire is_branch;
     wire is_sync;
 
-    alu u_alu (
+    alu_int32 u_alu_int32 (
         .clk (clk),
         .rst_n (core_rst_n),
         .op (op),
