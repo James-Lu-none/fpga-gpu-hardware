@@ -1,31 +1,49 @@
 `timescale 1ns / 1ps
-// ALU (Arithmetic Logic Unit)
-// 
-// ALU is instantiated in processing_block.sv
-// currently it only supports integer arithmetic (ADD, SUB, MUL) 
-// and logical operations for all active threads in a warp. 
-// It processes multiple lanes in parallel
+// 32-bit Integer ALU Lane (Single SIMD Lane)
 //
+// Represents a single 32-bit SIMD Execution Lane.
+// Multiple instances of this module are generated across the vector datapath.
+// Currently supports integer arithmetic (ADD, SUB, MUL) and logical operations.
+//
+// Pipeline Architecture:
+// - Execution Stage 1: Pipelined arithmetic operations (ADD, SUB, MUL) to break DSP critical paths.
+// - Execution Stage 2: MUXing, Condition Codes (NZP), and S2R resolution.
+// originally, we did too much work in the same clock cycle
+// 1. decode opcode 
+// 2. perform arithmetic execution
+// 3. send result to comparator to check if result is zero or negative and generate NZP code 
+// 4. send to PC module 
+// 5. write to warp_nzp_reg
+// so we separate arithmetic execution from other pipeline stages. 
+// This is because arithmetic execution (especially multiplication) is very time consuming and will make the critical path too long.
+// So we seperate Arithmetic Execution and NZP computation into two pipeline stages. 
 
 import gpu_pkg::*;
 
-module alu_int32 (
+module alu_int32 #(
+    parameter LANE_INDEX = 0
+)(
     input wire clk,
     input wire rst_n,
 
-    // Operand Interface
-    operand_if.slave op,
+    // Instruction & Control
+    input wire        valid,
+    input wire [7:0]  opcode,
+    input wire [31:0] imm,
 
-    // Write-Back Interface (To vector_regfile)
-    wb_if.master wb,
+    // 32-bit Lane Operands
+    input wire [31:0] rs1_data,
+    input wire [31:0] rs2_data,
 
-    // To PC module
-    output wire alu_updates_nzp,
-    output wire [2:0] next_nzp0,
-    output wire [2:0] next_nzp1,
-    output wire is_exit,
-    output wire is_branch,
-    output wire is_sync
+    // Thread Context (for Special Register S2R)
+    input wire [4:0]  lane_id,
+    input wire [15:0] thread_id_start,
+    input wire [15:0] block_idx_x,
+    input wire [15:0] block_idx_y,
+
+    // Lane Outputs
+    output reg [31:0] result,
+    output wire [2:0] next_nzp
 );
 
     // Opcodes Definition
@@ -39,150 +57,83 @@ module alu_int32 (
     localparam OP_SYNC = 8'hE0;
     localparam OP_EXIT = 8'hFF;
 
-    // ALU Combinational Logic
-    wire [31:0] lane0_rs1 = op.rs1_data[31:0];
-    wire [31:0] lane1_rs1 = op.rs1_data[63:32];
-    
-    wire [31:0] lane0_rs2 = op.is_imm ? op.imm : op.rs2_data[31:0];
-    wire [31:0] lane1_rs2 = op.is_imm ? op.imm : op.rs2_data[63:32];
-
-    // originally, we did too much work in the same clock cycle:
-    // decode opcode 
-    // -> perform arithmetic execution, send result to comparator to check if result is zero or negative and generate NZP code 
-    // -> send to PC module 
-    // -> write to warp_nzp_reg
-    // so we separate arithmetic execution from other pipeline stages. 
-    // This is because arithmetic execution (especially multiplication) 
-    // is very time consuming and will make the critical path too long.
-    // So we seperate Arithmetic Execution and NZP computation into two pipeline stages. 
-    
     // Execution Stage 1: Arithmetic Execution (Pipelined to break DSP critical path)
-    reg [31:0] ex1_add0, ex1_add1;
-    reg [31:0] ex1_sub0, ex1_sub1;
-    reg [31:0] ex1_mul0, ex1_mul1;
-    
-    reg ex1_valid;
-    reg [7:0] ex1_opcode;
+    reg [31:0] ex1_add;
+    reg [31:0] ex1_sub;
+    reg [31:0] ex1_mul;
+
+    reg        ex1_valid;
+    reg [7:0]  ex1_opcode;
     reg [31:0] ex1_imm;
     reg [15:0] ex1_tid, ex1_bid_x, ex1_bid_y;
-    reg [4:0] ex1_rd;
-    reg [3:0] ex1_warp_id;
-    
+    reg [4:0]  ex1_lane_id;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            ex1_valid <= 1'b0;
+            ex1_valid   <= 1'b0;
+            ex1_opcode  <= 8'd0;
+            ex1_imm     <= 32'd0;
+            ex1_tid     <= 16'd0;
+            ex1_lane_id <= 5'd0;
+            ex1_bid_x   <= 16'd0;
+            ex1_bid_y   <= 16'd0;
+            ex1_add     <= 32'd0;
+            ex1_sub     <= 32'd0;
+            ex1_mul     <= 32'd0;
         end else begin
-            ex1_valid <= op.valid;
-            ex1_opcode <= op.opcode;
-            ex1_imm <= op.imm;
-            ex1_tid <= op.thread_id_start;
-            ex1_bid_x <= op.block_idx_x;
-            ex1_bid_y <= op.block_idx_y;
-            ex1_rd <= op.rd;
-            ex1_warp_id <= op.warp_id;
-            
-            // Vivado will push these registers directly into the DSP/Adder blocks
-            // which cuts the 10-level logic path in half
-            ex1_add0 <= lane0_rs1 + lane0_rs2;
-            ex1_add1 <= lane1_rs1 + lane1_rs2;
-            
-            ex1_sub0 <= lane0_rs1 - lane0_rs2;
-            ex1_sub1 <= lane1_rs1 - lane1_rs2;
-            
-            ex1_mul0 <= lane0_rs1 * lane0_rs2;
-            ex1_mul1 <= lane1_rs1 * lane1_rs2;
+            ex1_valid   <= valid;
+            ex1_opcode  <= opcode;
+            ex1_imm     <= imm;
+            ex1_tid     <= thread_id_start;
+            ex1_lane_id <= lane_id;
+            ex1_bid_x   <= block_idx_x;
+            ex1_bid_y   <= block_idx_y;
+
+            // Let Vivado infers DSP/Adder registers directly
+            ex1_add     <= rs1_data + rs2_data;
+            ex1_sub     <= rs1_data - rs2_data;
+            ex1_mul     <= rs1_data * rs2_data;
         end
     end
 
-    // Execution Stage 2: MUXing, Condition Codes (NZP), and Write-Back
-    reg [31:0] alu0_out;
-    reg [31:0] alu1_out;
-    reg alu_writes_reg;
-    reg _alu_updates_nzp;
-    reg _is_exit;
-    reg _is_branch;
-    reg _is_sync;
-    
+    // Execution Stage 2: MUXing, Special Registers & NZP Evaluation
+    reg _eval_nzp;
+
     always @(*) begin
-        alu0_out = 32'd0;
-        alu1_out = 32'd0;
-        alu_writes_reg = 1'b0;
-        _alu_updates_nzp = 1'b0;
-        _is_exit = 1'b0;
-        _is_branch = 1'b0;
-        _is_sync = 1'b0;
+        result    = 32'd0;
+        _eval_nzp = 1'b0;
 
         case (ex1_opcode)
             OP_ADD, OP_ADDI: begin
-                alu0_out = ex1_add0;
-                alu1_out = ex1_add1;
-                alu_writes_reg = 1'b1;
-                _alu_updates_nzp = 1'b1;
+                result    = ex1_add;
+                _eval_nzp = 1'b1;
             end
             OP_SUB, OP_CMP: begin
-                alu0_out = ex1_sub0;
-                alu1_out = ex1_sub1;
-                alu_writes_reg = (ex1_opcode == OP_SUB);
-                _alu_updates_nzp = 1'b1;
+                result    = ex1_sub;
+                _eval_nzp = 1'b1;
             end
             OP_MUL: begin
-                alu0_out = ex1_mul0;
-                alu1_out = ex1_mul1;
-                alu_writes_reg = 1'b1;
-                _alu_updates_nzp = 1'b0; // Disable NZP for MUL
+                result    = ex1_mul;
+                _eval_nzp = 1'b0; // NZP disabled for MUL
             end
             OP_S2R: begin
-                alu_writes_reg = 1'b1;
                 case (ex1_imm)
-                    32'd0: begin alu0_out = ex1_tid; alu1_out = ex1_tid + 32'd1; end
-                    32'd1: begin alu0_out = 32'd0; alu1_out = 32'd0; end
-                    32'd2: begin alu0_out = ex1_bid_x; alu1_out = ex1_bid_x; end
-                    32'd3: begin alu0_out = ex1_bid_y; alu1_out = ex1_bid_y; end
-                    default: begin alu0_out = 32'd0; alu1_out = 32'd0; end
+                    32'd0:   result = {16'd0, ex1_tid} + {27'd0, ex1_lane_id};
+                    32'd1:   result = 32'd0;
+                    32'd2:   result = {16'd0, ex1_bid_x};
+                    32'd3:   result = {16'd0, ex1_bid_y};
+                    default: result = 32'd0;
                 endcase
             end
-            OP_BR:   _is_branch = 1'b1;
-            OP_SYNC: _is_sync = 1'b1;
-            OP_EXIT: _is_exit = 1'b1;
             default: ;
         endcase
     end
 
-    // Drive PC module signals based on EX2 valid
-    assign alu_updates_nzp = _alu_updates_nzp && ex1_valid;
-    assign is_exit = _is_exit && ex1_valid;
-    assign is_branch = _is_branch && ex1_valid;
-    assign is_sync = _is_sync && ex1_valid;
-
     // Timing Optimization: Only ADD/SUB/CMP evaluate NZP
-    wire [31:0] nzp_eval0 = (_alu_updates_nzp) ? alu0_out : 32'hFFFFFFFF;
-    wire next_n0 = nzp_eval0[31];
-    wire next_z0 = (nzp_eval0 == 32'd0);
-    wire next_p0 = (!next_n0 && !next_z0);
-    assign next_nzp0 = {next_n0, next_z0, next_p0};
-
-    wire [31:0] nzp_eval1 = (_alu_updates_nzp) ? alu1_out : 32'hFFFFFFFF;
-    wire next_n1 = nzp_eval1[31];
-    wire next_z1 = (nzp_eval1 == 32'd0);
-    wire next_p1 = (!next_n1 && !next_z1);
-    assign next_nzp1 = {next_n1, next_z1, next_p1};
-
-    // Execution Stage 3: Write-Back Register
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            wb.valid <= 1'b0;
-        end else begin
-            wb.valid <= 1'b0;
-            if (ex1_valid) begin
-                if (alu_writes_reg && (ex1_rd != 5'd0)) begin
-                    wb.valid <= 1'b1;
-                    wb.warp_id <= ex1_warp_id;
-                    wb.rd <= ex1_rd;
-                    wb.data <= {alu1_out, alu0_out};
-                    wb.mask <= 32'hFFFFFFFF;
-                end
-            end
-        end
-    end
+    wire [31:0] nzp_eval = (_eval_nzp) ? result : 32'hFFFFFFFF;
+    wire next_n = nzp_eval[31];
+    wire next_z = (nzp_eval == 32'd0);
+    wire next_p = (!next_n && !next_z);
+    assign next_nzp = {next_n, next_z, next_p};
 
 endmodule
