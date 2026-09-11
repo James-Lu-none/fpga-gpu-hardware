@@ -3,6 +3,8 @@
 // Services memory requests from LSU. Connects to Shared L2 Cache.
 // Capacity: 2KB (64 lines x 32 Bytes) Direct Mapped
 
+import gpu_pkg::*;
+
 module l1_cache (
     input wire clk,
     input wire rst_n,
@@ -10,12 +12,12 @@ module l1_cache (
     // LSU Interface (Simple Handshake)
     input wire req_valid,
     input wire [31:0] req_addr,
-    input wire [63:0] req_wdata, // 64-bit (2 lanes x 32-bit)
+    input wire [DATA_W-1:0] req_wdata,
     input wire req_we,
     output reg req_ready, // Ready to accept new request
     
     output reg rsp_valid,
-    output reg [63:0] rsp_rdata,
+    output reg [DATA_W-1:0] rsp_rdata,
 
     // L2 Cache Interface (To GPC L2 Arbiter)
     output reg l2_req_valid,
@@ -60,7 +62,7 @@ module l1_cache (
 
     // Latch request
     reg [31:0] req_addr_q;
-    reg [63:0] req_wdata_q;
+    reg [DATA_W-1:0] req_wdata_q;
     reg req_we_q;
     wire [20:0] req_tag_q = req_addr_q[31:11];
     wire [5:0] req_index_q = req_addr_q[10:5];
