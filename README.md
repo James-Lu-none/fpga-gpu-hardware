@@ -48,28 +48,28 @@ originally, a custom pcie ip (`axi_pcie` + custom `gpu_dma_master.v` + software 
 ### riscv command processor (cp) softcore
 
 To mirror modern GPGPU hardware architectures (e.g. NVIDIA GSP / AMD CP):
-- An official **YosysHQ PicoRV32 RV32I RISC-V** core ([`rtl/picorv32.v`](file:///c:/Users/user/workspace/fpga-gpu/rtl/picorv32.v)) is integrated as an on-chip Command Processor.
-- **Direct Mailbox & Hardware IRQ Architecture (0-Latency Best Practice)**:
-  1. **`picorv32_axi` (CPU Softcore Top Module)**: PicoRV32 core wrapper with AXI4-Lite master interface and hardware interrupt (`irq[0]`) enabled.
-  2. **`riscv_bram.v` (Dual-Port On-Chip BRAM)**:
-     - **Port A**: Connected to RISC-V CPU for code and data execution.
-     - **Port B**: Connected directly to PCIe XDMA BAR0 MMIO for Host PC direct Mailbox writes (`0x3F00`).
-  3. **`riscv_cp_system.v` (SoC Top & Direct Mailbox Interconnect)**:
+- An official YosysHQ PicoRV32 RV32I RISC-V core ([`rtl/picorv32.v`](file:///c:/Users/user/workspace/fpga-gpu/rtl/picorv32.v)) is integrated as an on-chip Command Processor.
+- Direct Mailbox & Hardware IRQ Architecture (0-Latency Best Practice):
+  1. `picorv32_axi` (CPU Softcore Top Module): PicoRV32 core wrapper with AXI4-Lite master interface and hardware interrupt (`irq[0]`) enabled.
+  2. `riscv_bram.v` (Dual-Port On-Chip BRAM):
+     - Port A: Connected to RISC-V CPU for code and data execution.
+     - Port B: Connected directly to PCIe XDMA BAR0 MMIO for Host PC direct Mailbox writes (`0x3F00`).
+  3. `riscv_cp_system.v` (SoC Top & Direct Mailbox Interconnect):
      - Detects Host writes to Mailbox address `0x3F00` and generates a 1-cycle hardware interrupt pulse (`irq[0]`).
      - Routes RISC-V AXI Master to `gpu_compute_core` (`0x4000_0000`) and HDMI SiI9134 I2C controller (`0x5000_0000`).
-- **Role**:
+- Role:
   1. Offloads SiI9134 HDMI display controller I2C configuration.
   2. Interrupt-driven parsing of Host PCIe CUDA Task Descriptors directly from BRAM Mailbox (`0x3F00`).
   3. Dispatches parallel execution tasks to `gpu_compute_core` SIMD ALUs.
-- **Resource Footprint**: Consumes ~1,200 LUTs (< 1.5% of Artix-7 XC7A200T resources) with 16KB dual-port on-chip BRAM.
+- Resource Footprint: Consumes ~1,200 LUTs (< 1.5% of Artix-7 XC7A200T resources) with 16KB dual-port on-chip BRAM.
 
 ### clock and reset architecture
 
-- **PCIe Reference Clock Buffer (`IBUFDS_GTE2`)**: 
+- PCIe Reference Clock Buffer (`IBUFDS_GTE2`): 
   - The PCIe 100MHz reference clock uses Bank 216 GTP dedicated reference clock pins `F10` (`sys_clk_clk_p`) and `E10` (`sys_clk_clk_n`).
   - In 7-Series FPGAs, MGTREFCLK pins cannot connect to standard single-ended `IBUF` primitives due to physical silicon routing constraints.
   - A Utility Buffer IP (`util_ds_buf`) with `C_BUF_TYPE` set to `IBUFDSGTE` (`IBUFDS_GTE2`) is instantiated in Block Design (`design_1.bd`) to convert the differential clock input into `IBUF_OUT` for `xdma_0/sys_clk`.
-- **System Reset & Internal Clocking**:
+- System Reset & Internal Clocking:
   - External PCIe reset `sys_rst_n` (`T18`) feeds directly into `xdma_0/sys_rst_n`.
   - All internal user modules (`gpu_top`, `gpu_regs_slave_lite_v1_0_S00_AXI`, `gpu_compute_core`) operate on XDMA's generated clock `xdma_0/axi_aclk` (125MHz) and active-low reset `xdma_0/axi_aresetn`.
 
@@ -77,21 +77,21 @@ To mirror modern GPGPU hardware architectures (e.g. NVIDIA GSP / AMD CP):
 
 The register space is built using Vivado IP Wizard generated AXI4-Lite Slave peripheral ([`rtl/gpu_regs_slave_lite_v1_0_S00_AXI.v`](file:///c:/Users/user/workspace/fpga-gpu/rtl/gpu_regs_slave_lite_v1_0_S00_AXI.v)).
 
-1. **Pristine Register Case**:
+1. Pristine Register Case:
    - The wizard-generated AXI-Lite write `case` statement remains 100% untouched for standard register write storage (`slv_reg0` .. `slv_reg15`).
    - The `assign S_AXI_RDATA` statement remains pristine Vivado template code returning `slv_reg0` .. `slv_reg15`.
 
-2. **Encapsulated User Logic Block**:
+2. Encapsulated User Logic Block:
    - All custom hardware logic is encapsulated inside the dedicated `// Add user logic here` block at the end of the module.
-   - **Doorbell (`0x00`)**: Generates a 1-cycle `doorbell_pulse` start trigger when writing non-zero to `slv_reg0`.
-   - **INT_STATUS (`0x04`)**: Hardware latches `slv_reg1[0] <= 1'b1` when GPU compute completes (`task_done_irq`).
-   - **INT_ACK (`0x08`)**: Clears `slv_reg1[0] <= 1'b0` and generates a 1-cycle `irq_ack_pulse` when writing to `0x08` (`slv_reg2`).
-   - **DMA Addresses (`0x0C`~`0x18`)**: Output continuous 64-bit bus addresses `reg_ring_dma_addr` (`{slv_reg4, slv_reg3}`) and `reg_desc_dma_addr` (`{slv_reg6, slv_reg5}`) to top-level logic.
-   - **OPCODE (`0x1C`)**: Outputs 32-bit SIMD vector opcode `reg_opcode` (`slv_reg7`).
+   - Doorbell (`0x00`): Generates a 1-cycle `doorbell_pulse` start trigger when writing non-zero to `slv_reg0`.
+   - INT_STATUS (`0x04`): Hardware latches `slv_reg1[0] <= 1'b1` when GPU compute completes (`task_done_irq`).
+   - INT_ACK (`0x08`): Clears `slv_reg1[0] <= 1'b0` and generates a 1-cycle `irq_ack_pulse` when writing to `0x08` (`slv_reg2`).
+   - DMA Addresses (`0x0C`~`0x18`): Output continuous 64-bit bus addresses `reg_ring_dma_addr` (`{slv_reg4, slv_reg3}`) and `reg_desc_dma_addr` (`{slv_reg6, slv_reg5}`) to top-level logic.
+   - OPCODE (`0x1C`): Outputs 32-bit SIMD vector opcode `reg_opcode` (`slv_reg7`).
 
 ### cuda kernel submission & host pipeline
 
-- **Host Task Descriptor Application ([`host/cuda_kernel_submit.cpp`](file:///c:/Users/user/workspace/fpga-gpu/host/cuda_kernel_submit.cpp))**:
+- Host Task Descriptor Application ([`host/cuda_kernel_submit.cpp`](file:///c:/Users/user/workspace/fpga-gpu/host/cuda_kernel_submit.cpp)):
   - Provides a CUDA-like kernel submission C++ runtime application.
   - Constructs 64-byte aligned `cuda_task_descriptor` (Magic `0x43554441`, Opcode, Grid/Block dimensions, DMA pointers).
   - Streams vector payload data to FPGA over XDMA H2C device (`/dev/xdma0_h2c_0`).
@@ -100,15 +100,39 @@ The register space is built using Vivado IP Wizard generated AXI4-Lite Slave per
 
 ### cuda compute core & shared memory (smem) hierarchy
 
-- **SIMD Vector Compute Core ([`rtl/gpu_compute_core.v`](file:///c:/Users/user/workspace/fpga-gpu/rtl/gpu_compute_core.v))**:
+- SIMD Vector Compute Core ([`rtl/gpu_compute_core.v`](file:///c:/Users/user/workspace/fpga-gpu/rtl/gpu_compute_core.v)):
   - Implements an AXI4-Stream 64-bit SIMD vector compute pipeline.
-  - **CUDA Shared Memory (SMEM / Scratchpad SRAM)**: Integrates an ultra-fast 256-word x 64-bit On-Chip SRAM inside the core, mirroring modern NVIDIA GPU Memory Hierarchies (RMEM/SMEM tier).
-  - **Supported Opcodes**:
-    - **`Opcode 1` (Vector Add)**: $Output = Input + 1$ (Streams to C2H).
-    - **`Opcode 2` (Vector Multiply)**: $Output = Input \times 2$ (Streams to C2H).
-    - **`Opcode 3` (CUDA Parallel Render)**: Computes 24-bit RGB pixel data and writes directly to Framebuffer VRAM (`framebuffer_ram.v`) for HDMI 1080P output.
-    - **`Opcode 4` (SMEM Write)**: Stores incoming stream payload into SMEM Scratchpad SRAM.
-    - **`Opcode 5` (SMEM Multi-Pass Accumulate)**: Multi-pass execution ($Output[i] = Input[i] + \text{SMEM}[i]$).
+  - CUDA Shared Memory (SMEM / Scratchpad SRAM): Integrates an ultra-fast 256-word x 64-bit On-Chip SRAM inside the core, mirroring modern NVIDIA GPU Memory Hierarchies (RMEM/SMEM tier).
+  - Supported Opcodes:
+    - `Opcode 1` (Vector Add): Output = Input + 1 (Streams to C2H).
+    - `Opcode 2` (Vector Multiply): Output = Input * 2 (Streams to C2H).
+    - `Opcode 3` (CUDA Parallel Render): Computes 24-bit RGB pixel data and writes directly to Framebuffer VRAM (`framebuffer_ram.v`) for HDMI 1080P output.
+    - `Opcode 4` (SMEM Write): Stores incoming stream payload into SMEM Scratchpad SRAM.
+    - `Opcode 5` (SMEM Multi-Pass Accumulate): Multi-pass execution ($Output[i] = Input[i] + \text{SMEM}[i]$).
+
+### Instruction Pipeline Design Choices & Distributed SIMT Control Architecture
+
+Unlike classical CPU pipelining (which relies on a single, centralized Hazard Detection Unit and complex Forwarding/Bypass multiplexers), our FPGA GPGPU implements a Distributed, Warp-Level Decoupled Control Architecture optimized for SIMT execution and FPGA timing closure:
+
+1. Single In-Flight Instruction per Warp (Zero-RAW Hazard by Construction):
+   - When the Warp Scheduler (`warp_context.sv`) issues an instruction from a warp (`issue.valid = 1`), it immediately transitions that warp's state from `STATE_READY` to `STATE_STALL`.
+   - The warp remains stalled until the instruction traverses through Fetch, Decode, VRF Read, Execution (ALU / LSU), and reaches Write-Back, where a feedback pulse (`ctx_wb.valid`) restores the warp to `STATE_READY`.
+   - Advantage: Eliminates the need for expensive register forwarding paths and hazard detection logic across the 32-word vector register file. Read-After-Write (RAW) data hazards are physically impossible within any warp.
+
+2. SIMT Latency Hiding via Multi-Warp Round-Robin Scheduling:
+   - While an issued warp is stalled in the pipeline (a 4~5 cycle structural latency for arithmetic, or variable latency for cache/DRAM memory requests), the scheduler round-robins across up to `MAX_WARPS` resident warps in the same Sub-Partition.
+   - If sufficient warps are resident, the pipeline achieves 100% throughput (1 instruction issued per cycle) with zero bubble insertion, fulfilling the foundational GPU design principle of hiding latency through thread-level parallelism (TLP).
+
+3. Micro-Timing Latency Matching for FPGA Block RAMs:
+   - Both the Instruction RAM (I-RAM in `fetch_decode.sv`) and Vector Register File (dual-ported BRAMs in `vector_regfile.sv`) have an inherent, unchangeable 1-cycle synchronous read latency on Xilinx 7-Series FPGAs.
+   - To maintain deterministic alignment without stalling the pipeline, strict D-flip-flop delay chains (`issue_*_q` and `decode_*_q`) propagate control tokens (Opcode, Rd, Imm, Active Mask, Warp ID) in exact lockstep with the synchronous memory reads. Data and control arrive at the execution stage on the exact same clock edge.
+
+4. Decoupled Variable-Latency Execution (Fixed-Latency ALU vs. Asynchronous LSU):
+   - ALU (Fixed 2-Cycle Execution): Pipelined into `EX1` (DSP `MREG` registered addition/subtraction/multiplication to break critical paths) and `EX2` (Opcode multiplexing, condition code NZP generation, and S2R resolution).
+   - LSU (Asynchronous Memory Handshake): Interfaces with L1/L2 caches using valid/ready request and response protocols. Memory instructions release their warp only when data returns from the cache hierarchy or memory subsystem, decoupling arithmetic execution from unpredictable DRAM burst latencies.
+
+5. Structural Hazard Resolution at Write-Back:
+   - In `sp_top.sv`, a Write-Back Arbiter arbitrates between ALU completions and LSU cache refills. LSU write-backs are granted strict priority (`wb.valid = lsu_wb.valid ? lsu_wb.valid : alu_wb.valid`) to prevent memory pipeline head-of-line blocking and buffer overflow.
 
 ### GPC to framebuffer
 
@@ -191,9 +215,9 @@ The entire system uses XDMA's generated clock (axi_aclk: 125MHz) and asynchronou
 4. time violation from opcode to warp_nzp (long path in ALU)
   original combinational route/pipeline: opcode -> ALU (including 32x32 DSP multiplier) -> zero comparator -> warp_nzp_reg.
   This route takes >10ns because 32x32 multiplication on Artix-7 requires cascading multiple DSP slices, causing massive internal propagation delay.
-  **Fix**: We implemented a 2-cycle execution pipeline in `alu.sv` and `pc.sv`. We added an `EX1` stage to explicitly register the outputs of the add/sub/mul operators. This forces Vivado to use the internal pipeline registers of the DSP (`MREG`) and CARRY4 blocks, cutting the combinational logic path in half. The condition code evaluations (NZP) and write-backs are performed in the `EX2` and `EX3` stages. Because the `warp_context` scheduler uses a decoupled handshake (`ctx_wb.valid`), adding latency to the ALU does not cause data hazards.
+  Fix: We implemented a 2-cycle execution pipeline in `alu.sv` and `pc.sv`. We added an `EX1` stage to explicitly register the outputs of the add/sub/mul operators. This forces Vivado to use the internal pipeline registers of the DSP (`MREG`) and CARRY4 blocks, cutting the combinational logic path in half. The condition code evaluations (NZP) and write-backs are performed in the `EX2` and `EX3` stages. Because the `warp_context` scheduler uses a decoupled handshake (`ctx_wb.valid`), adding latency to the ALU does not cause data hazards.
 
 5. time violation from current_sm to valid_ram and m_axi_araddr in l2_cache
   original combinational route/pipline: current_sm (Arbiter MUX) -> req_addr (sliced into req_index) -> valid_ram / tag_ram (LUTRAM Asynchronous Read) -> 18-bit Tag Comparator -> FSM Logic -> valid_ram WE / m_axi_awaddr.
   This 1-cycle cache architecture puts the arbitration MUX, RAM read, Tag compare, and AXI state transition all in a single cycle (`STATE_IDLE`), causing a massive combinational path.
-  **Fix**: We pipelined the L2 cache arbitration by introducing a new FSM state `STATE_COMPARE`. In `STATE_IDLE`, the arbiter only determines the winning SM and latches the request into pipeline registers (`latched_req_*`). In `STATE_COMPARE`, the FSM uses the latched request to index the RAMs, execute the hit/miss logic, and determine the next AXI state. This isolates the arbitration MUX into its own cycle and completely breaks the critical path into the Cache RAM address decoders.
+  Fix: We pipelined the L2 cache arbitration by introducing a new FSM state `STATE_COMPARE`. In `STATE_IDLE`, the arbiter only determines the winning SM and latches the request into pipeline registers (`latched_req_*`). In `STATE_COMPARE`, the FSM uses the latched request to index the RAMs, execute the hit/miss logic, and determine the next AXI state. This isolates the arbitration MUX into its own cycle and completely breaks the critical path into the Cache RAM address decoders.
