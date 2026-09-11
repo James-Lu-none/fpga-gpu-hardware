@@ -48,63 +48,111 @@ module streaming_multiprocessor #(
     end
     wire sm_rst_n = sm_rst_n_reg;
 
-    // 1. Thread Block Receiver (Local Scheduler) & Alloc Dispatcher
-    warp_alloc_if alloc_rx();
+    // 1. sm level contoller
+    // collect warp allocation status from SPs
+    // report available_warp_slots
+    // accept block from TBS and report status
+    localparam ST_IDLE = 3'd0;
+    localparam ST_ISSUE_WARP = 3'd1;
+    localparam ST_WAIT_WARP = 3'd2;
+    localparam ST_NEXT_WARP = 3'd3;
+
+    reg [2:0] rx_state;
+    reg [9:0] warp_cnt;
+    wire [15:0] linear_block_id = block_idx_x + (block_idx_y * 16'd65535);
+
     warp_alloc_if alloc [0:NUM_SPS-1]();
 
-    block_receiver u_block_rx (
-        .clk (clk),
-        .rst_n (sm_rst_n),
-        .block_issue_valid (block_issue_valid),
-        .block_idx_x (block_idx_x),
-        .block_idx_y (block_idx_y),
-        .warps_per_block (warps_per_block),
-        .block_accepted (block_accepted),
-        .alloc (alloc_rx)
-    );
+    // Target Sub-Partition selection (select sp that has most free warp slots)
+    wire [$clog2(NUM_SPS)-1:0] alloc_target_sp;
+    wire [4:0] max_free_slots;
 
-    // Alloc Dispatcher: Routes warp launch to the Sub-Partition with available slots
     generate
-        if (NUM_SPS == 1) begin : gen_alloc_single
-            assign alloc[0].valid            = alloc_rx.valid;
-            assign alloc[0].block_id         = alloc_rx.block_id;
-            assign alloc[0].block_idx_x      = alloc_rx.block_idx_x;
-            assign alloc[0].block_idx_y      = alloc_rx.block_idx_y;
-            assign alloc[0].thread_id_start  = alloc_rx.thread_id_start;
-            assign alloc[0].active_mask      = alloc_rx.active_mask;
-            assign alloc_rx.ready            = alloc[0].ready;
-            assign alloc_rx.available_slots  = alloc[0].available_slots;
-            assign available_warp_slots      = alloc[0].available_slots;
-        end else begin : gen_alloc_multi
-            // Multi-SP Dispatcher: Round-robin or best-effort slot allocation
-            reg [$clog2(NUM_SPS)-1:0] alloc_target_sp;
-            reg [4:0] max_free_slots;
+        if (NUM_SPS == 1) begin : gen_alloc_target_single
+            assign alloc_target_sp = '0;
+            assign max_free_slots  = alloc[0].available_slots;
+        end else begin : gen_alloc_target_multi
+            reg [$clog2(NUM_SPS)-1:0] target_sp_reg;
+            reg [4:0]                 max_slots_reg;
 
             always @(*) begin
-                alloc_target_sp = '0;
-                max_free_slots  = 5'd0;
+                target_sp_reg = '0;
+                max_slots_reg = 5'd0;
                 for (int s = 0; s < NUM_SPS; s = s + 1) begin
-                    if (alloc[s].available_slots > max_free_slots) begin
-                        max_free_slots  = alloc[s].available_slots;
-                        alloc_target_sp = s[$clog2(NUM_SPS)-1:0];
+                    if (alloc[s].available_slots > max_slots_reg) begin
+                        max_slots_reg = alloc[s].available_slots;
+                        target_sp_reg = s[$clog2(NUM_SPS)-1:0];
                     end
                 end
             end
 
-            for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_routing
-                assign alloc[s].valid           = alloc_rx.valid && (alloc_target_sp == s);
-                assign alloc[s].block_id        = alloc_rx.block_id;
-                assign alloc[s].block_idx_x     = alloc_rx.block_idx_x;
-                assign alloc[s].block_idx_y     = alloc_rx.block_idx_y;
-                assign alloc[s].thread_id_start = alloc_rx.thread_id_start;
-                assign alloc[s].active_mask     = alloc_rx.active_mask;
-            end
-
-            assign alloc_rx.ready           = alloc[alloc_target_sp].ready;
-            assign alloc_rx.available_slots = max_free_slots;
-            assign available_warp_slots     = max_free_slots;
+            assign alloc_target_sp = target_sp_reg;
+            assign max_free_slots  = max_slots_reg;
         end
     endgenerate
+
+    assign available_warp_slots = max_free_slots;
+    wire alloc_ready = alloc[alloc_target_sp].ready;
+
+    reg alloc_valid_reg;
+    reg block_accepted_reg;
+    assign block_accepted = block_accepted_reg;
+
+    always @(posedge clk or negedge sm_rst_n) begin
+        if (!sm_rst_n) begin
+            rx_state           <= ST_IDLE;
+            alloc_valid_reg    <= 1'b0;
+            block_accepted_reg <= 1'b0;
+            warp_cnt           <= 10'd0;
+        end else begin
+            case (rx_state)
+                ST_IDLE: begin
+                    alloc_valid_reg    <= 1'b0;
+                    block_accepted_reg <= 1'b0;
+                    if (block_issue_valid) begin
+                        warp_cnt           <= 10'd0;
+                        block_accepted_reg <= 1'b1;
+                        rx_state           <= ST_ISSUE_WARP;
+                    end
+                end
+
+                ST_ISSUE_WARP: begin
+                    block_accepted_reg <= 1'b0; // Deassert ack
+                    alloc_valid_reg    <= 1'b1;
+                    if (alloc_ready) begin
+                        rx_state <= ST_WAIT_WARP;
+                    end
+                end
+
+                ST_WAIT_WARP: begin
+                    alloc_valid_reg <= 1'b0;
+                    if (alloc_ready) begin
+                        rx_state <= ST_NEXT_WARP;
+                    end
+                end
+
+                ST_NEXT_WARP: begin
+                    if (warp_cnt + 1 < warps_per_block) begin
+                        warp_cnt <= warp_cnt + 1'b1;
+                        rx_state <= ST_ISSUE_WARP;
+                    end else begin
+                        rx_state <= ST_IDLE;
+                    end
+                end
+
+                default: rx_state <= ST_IDLE;
+            endcase
+        end
+    end
+
+    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_ports
+        assign alloc[s].valid            = alloc_valid_reg && (alloc_target_sp == s);
+        assign alloc[s].block_id         = linear_block_id;
+        assign alloc[s].block_idx_x      = block_idx_x;
+        assign alloc[s].block_idx_y      = block_idx_y;
+        assign alloc[s].thread_id_start  = warp_cnt * WARP_SIZE;
+        assign alloc[s].active_mask      = 32'hFFFFFFFF;
+    end
 
     // 2. Sub-Partitions (Compute Blocks)
     wire [NUM_SPS-1:0]        sp_l1_req_valid;
