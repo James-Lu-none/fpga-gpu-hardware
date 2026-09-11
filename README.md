@@ -120,6 +120,61 @@ lsu module in sm_processing_block will only write to L2 cache instead of writing
 - L1 cache: instatiat at SM level, serve for all processing_block in a SM
 - L2 cache: instatiat at GPC level, serve for all SMs in a GPC
 
+
+### cache design
+
+full address (ex: 32 bits)
+cache line size: 256 bits = 32 bytes -> 5 bits offset (addr[4:0])
+-> block ID: 32 - 5 = 27 bits (addr[31:5])
+associative addressing: three ways of mapping memory blocks into cache lines:
+1. Fully associative: 
+   - Every memory block can be cached in ANY available cache line.
+   - Tag: 27 bits (addr[31:5], directly equals Block ID)
+   - Block Offset: 5 bits (addr[4:0])
+   - Pros/Cons: No conflict misses (no thrashing), but requires comparing tags across ALL cache lines simultaneously (expensive CAM / parallel comparators) and needs a replacement policy when full.
+2. Direct mapped (currently used in L1 & L2): 
+   - Every block maps to exactly ONE fixed cache line determined by its index.
+   - Tag: 21 bits (addr[31:11] for L1)
+   - Index: 6 bits = 64 entries (addr[10:5] for L1)
+   - Block Offset: 5 bits (addr[4:0])
+   - Pros/Cons: Very cheap in hardware (only 1 tag comparison per access, no replacement policy needed). But susceptible to thrashing if multiple accessed addresses share the same index but have different tags.
+3. Set associative (N-way): 
+   - Balanced between 1 and 2. The cache is divided into S sets, where each set contains N cache lines (N-way).
+   - A block maps to a fixed Set (via Set Index), but can occupy ANY of the N lines within that Set.
+   - Set count S = (Total Lines) / N. Set Index bits = log2(S).
+   - Needs N tag comparators and a replacement policy (LRU/FIFO/Random) per set.
+* Replacement algorithms (used in Fully Associative & Set Associative when a set/cache is full):
+1. FIFO (First In First Out)
+2. LRU (Least Recently Used)
+3. LFU (Least Frequently Used)
+4. Random
+
+* since we have limited resource on FPGA, so we choose to implement l1 and l2 cache to both use direct-mapped cache 
+
+And for write policies we have:
+1. Write Through: every write to the cache also write to memory
+2. Write back: update memory only when a dirty line is replaced
+
+* we do write through and no-write-allocate (don't grab from memory is write miss) also for simplicity
+
+And for Flags we have:
+1. Type: idicates whethere its data for instuction
+2. Valid: Indicates if the line contains valid cached data. Required for Tag Hit evaluation.
+3. Lock: lock a line to prevent replacement
+4. dirty: Identify a line that has been written but not updated in mem
+
+Because both our L1 and L2 caches implement a Write-Through policy, the cache content is never out of sync. Therefore, no dirty tracking is required. And since we use a seperate cache (I-RAM) for instruction so type is not required too. Also Lock is not required too.
+
+### solving cache incoherence
+
+Since DRAM allows read/write from both Host PCIe XDMA and L2 Cache through axi_crossbar_0, if the Host updates memory via XDMA, the L2/L1 cache is unaware of this update (no hardware bus snooping in the crossbar). If the GPU reads that address, it would hit stale cached data.
+
+so we implement Software / Hardware-Triggered Cache Invalidation (Flush):
+- GPC Control Register provides a `cache_flush` pulse:
+  1. Automatic Invalidation: Every time a Kernel is launched (`hw_trigger` written via offset `0x00`), `cache_flush` automatically pulses for 1 cycle.
+  2. Explicit Invalidation: Host / RISC-V can write to offset `0x28` (or `0x00` bit 1) to explicitly invalidate caches on demand.
+- Both L1 Cache (64 lines) and L2 Cache (512 lines) implement `valid_ram` using distributed registers (flip-flops), clearing all valid bits to `0` in a single clock cycle without latency penalty. This forces subsequent GPU memory accesses to miss and fetch the latest data updated by XDMA from DRAM.
+
 ### issues during implementation
 
 The entire system uses XDMA's generated clock (axi_aclk: 125MHz) and asynchronous reset (axi_aresetn)
