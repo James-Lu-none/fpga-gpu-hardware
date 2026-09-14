@@ -302,11 +302,13 @@ module l2_cache #(
                     if (m_axi_wvalid && m_axi_wready) begin
                         m_axi_wvalid <= 1'b0;
                         m_axi_wlast <= 1'b0;
+                        m_axi_bready <= 1'b1; // Assert BREADY to accept write response
                         state <= STATE_AXI_B;
                     end
                 end
                 STATE_AXI_B: begin
                     if (m_axi_bvalid && m_axi_bready) begin
+                        m_axi_bready <= 1'b0; // Deassert BREADY after handshake
                         // Write complete
                         sm_rsp_valid[current_sm] <= 1'b1; // ACK
                         req_ready_internal <= 1'b1;
