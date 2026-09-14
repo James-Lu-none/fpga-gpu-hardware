@@ -677,49 +677,10 @@ module top (
         .hdmi_init_done (hdmi_init_done)
     );
 
-    // Activity Pulse Stretchers (Stretch high-speed ns pulses to ~40ms for human vision)
-    localparam STRETCH_CYCLES = 23'd5_000_000; // ~40ms at 125MHz axi_aclk
-
-    // Raw Activity Detection Pulses
-    wire bram_pulse = gpu_bram_act;
-    wire ddr3_pulse = (cdc_mig_axi.awvalid & cdc_mig_axi.awready) |
-                      (cdc_mig_axi.arvalid & cdc_mig_axi.arready);
-    wire l2_pulse   = gpu_l2_act;
-
-    reg [22:0] bram_timer = 23'd0;
-    reg [22:0] ddr3_timer = 23'd0;
-    reg [22:0] l2_timer   = 23'd0;
-
-    always_ff @(posedge axi_aclk or negedge axi_aresetn) begin
-        if (!axi_aresetn) begin
-            bram_timer <= 23'd0;
-            ddr3_timer <= 23'd0;
-            l2_timer   <= 23'd0;
-        end else begin
-            // BRAM Timer
-            if (bram_pulse)
-                bram_timer <= STRETCH_CYCLES;
-            else if (bram_timer != 23'd0)
-                bram_timer <= bram_timer - 1'b1;
-
-            // DDR3 Timer
-            if (ddr3_pulse)
-                ddr3_timer <= STRETCH_CYCLES;
-            else if (ddr3_timer != 23'd0)
-                ddr3_timer <= ddr3_timer - 1'b1;
-
-            // L2 Cache Timer
-            if (l2_pulse)
-                l2_timer <= STRETCH_CYCLES;
-            else if (l2_timer != 23'd0)
-                l2_timer <= l2_timer - 1'b1;
-        end
-    end
-
-    // LED Status Indicators
+    // Static Hardware Status LED Indicators
     // Active-low LEDs: Outputting 0 turns the LED ON.
-    assign led1 = ~(bram_timer != 23'd0); // LED1: Host PCIe / Mailbox Activity (Flashes upon Host task submission)
-    assign led2 = ~(ddr3_timer != 23'd0); // LED2: DDR3 Read/Write Activity (Flashes upon DDR3 access)
-    assign led3 = ~(l2_timer   != 23'd0); // LED3: L2 Cache Read/Write Activity (Flashes upon L2 hit/miss/refill)
-    assign led4 = ~gpu_gpc_busy;          // LED4: GPC Compute Activity (Solid ON when Compute Task running, OFF when idle)
+    assign led1 = ~user_lnk_up;      // LED1: PCIe Link Up (Solid ON when PCIe Link trained and active)
+    assign led2 = ~mig_calib_done;   // LED2: DDR3 Ready (Solid ON when DDR3 calibration succeeds)
+    assign led3 = ~rv_reset_n;       // LED3: PicoRV32 Active (Solid ON when CPU released from reset and running)
+    assign led4 = ~gpu_gpc_busy;     // LED4: GPC Compute Activity (Solid ON when GPU Compute Task is running, OFF when idle)
 endmodule
