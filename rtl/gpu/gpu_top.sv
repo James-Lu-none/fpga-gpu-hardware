@@ -190,30 +190,12 @@ module gpu_top (
     );
 
     // AXI Control Registers (Port M01)
-    rv_control_register_0 u_ctrl_regs (
-        .s00_axi_aclk    (clk),
-        .s00_axi_aresetn (sys_rst_n),
-        .irq_out         (irq_reg),
-        .cpu_soft_rst_n_out (cpu_soft_rst_n),
-        .s00_axi_awaddr  (ctrl_axi.awaddr[5:0]),
-        .s00_axi_awprot  (ctrl_axi.awprot),
-        .s00_axi_awvalid (ctrl_axi.awvalid),
-        .s00_axi_awready (ctrl_axi.awready),
-        .s00_axi_wdata   (ctrl_axi.wdata),
-        .s00_axi_wstrb   (ctrl_axi.wstrb),
-        .s00_axi_wvalid  (ctrl_axi.wvalid),
-        .s00_axi_wready  (ctrl_axi.wready),
-        .s00_axi_bresp   (ctrl_axi.bresp),
-        .s00_axi_bvalid  (ctrl_axi.bvalid),
-        .s00_axi_bready  (ctrl_axi.bready),
-        .s00_axi_araddr  (ctrl_axi.araddr[5:0]),
-        .s00_axi_arprot  (ctrl_axi.arprot),
-        .s00_axi_arvalid (ctrl_axi.arvalid),
-        .s00_axi_arready (ctrl_axi.arready),
-        .s00_axi_rdata   (ctrl_axi.rdata),
-        .s00_axi_rresp   (ctrl_axi.rresp),
-        .s00_axi_rvalid  (ctrl_axi.rvalid),
-        .s00_axi_rready  (ctrl_axi.rready)
+    rv_control_register u_ctrl_regs (
+        .clk                (clk),
+        .rst_n              (sys_rst_n),
+        .s_axi_lite         (ctrl_axi),
+        .irq_out            (irq_reg),
+        .cpu_soft_rst_n_out (cpu_soft_rst_n)
     );
 
 

@@ -3,9 +3,9 @@
 open_project fpga-gpu.xpr
 
 # open project will load all files loaded in the ui, but we can still add files
-add_files [glob rtl/*.sv]
-add_files [glob constrs/*.xdc]
-add_files [glob constrs/*.ucf]
+add_files -quiet [glob -nocomplain rtl/*.sv rtl/*/*.sv rtl/*/*/*.sv rtl/*/*/*/*.sv]
+add_files -quiet [glob -nocomplain constrs/*.xdc]
+add_files -quiet [glob -nocomplain constrs/*.ucf]
 
 # reset runs
 reset_run synth_1
