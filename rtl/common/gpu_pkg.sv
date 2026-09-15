@@ -1,6 +1,10 @@
 `timescale 1ns / 1ps
 
 package gpu_pkg;
+    // Architecture Version Parameters
+    parameter HW_VERSION_MAJOR = 32'd1;
+    parameter HW_VERSION_MINOR = 32'd0;
+
     // Architecture Hierarchy Parameters (N, M, K)
     parameter NUM_SMS = 2;
     parameter NUM_SUB_PARTITIONS = 1;

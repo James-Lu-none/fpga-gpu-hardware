@@ -1,6 +1,8 @@
 
 `timescale 1 ns / 1 ps
 
+import gpu_pkg::*;
+
 	module rv_control_register_slave_lite_v1_0_S00_AXI #
 	(
 		// Users to add parameters here
@@ -221,8 +223,8 @@
 	    begin
 	      slv_reg0 <= 0;
 	      slv_reg1 <= 0;
-	      slv_reg2 <= 32'h20260915; // Hardware Version (YYYYMMDD)
-	      slv_reg3 <= 32'h56475055; // Hardware Magic "VGPU"
+	      slv_reg2 <= gpu_pkg::HW_VERSION_MAJOR; // Hardware Major Version
+	      slv_reg3 <= gpu_pkg::HW_VERSION_MINOR; // Hardware Minor Version
 	      slv_reg4 <= 0;
 	      slv_reg5 <= 0;
 	      slv_reg6 <= 0;
@@ -255,12 +257,12 @@
 	                slv_reg1[(byte_index*8) +: 8] <= S_AXI_WDATA[(byte_index*8) +: 8];
 	              end  
 	          4'h2: begin
-	            // Read-Only: HW_VERSION (0x20260915)
-	            slv_reg2 <= 32'h20260915;
+	            // Read-Only: HW Major Version from gpu_pkg
+	            slv_reg2 <= gpu_pkg::HW_VERSION_MAJOR;
 	          end
 	          4'h3: begin
-	            // Read-Only: HW_MAGIC "VGPU" (0x56475055)
-	            slv_reg3 <= 32'h56475055;
+	            // Read-Only: HW Minor Version from gpu_pkg
+	            slv_reg3 <= gpu_pkg::HW_VERSION_MINOR;
 	          end
 	          4'h4:
 	            for ( byte_index = 0; byte_index <= (C_S_AXI_DATA_WIDTH/8)-1; byte_index = byte_index+1 )
