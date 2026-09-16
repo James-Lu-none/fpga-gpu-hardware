@@ -21,8 +21,7 @@ module pc (
 
     // From ALU
     input wire alu_updates_nzp,
-    input wire [2:0] next_nzp0,
-    input wire [2:0] next_nzp1,
+    input wire [2:0] next_nzp [0:NUM_LANES-1],
     input wire is_exit,
     input wire is_branch,
     input wire is_sync,
@@ -33,12 +32,12 @@ module pc (
 
     // NZP Registers (Condition Codes per Warp, Per Lane)
     // [2]=N, [1]=Z, [0]=P
-    reg [2:0] warp_nzp [0:MAX_WARPS-1][0:31];
+    reg [2:0] warp_nzp [0:MAX_WARPS-1][0:NUM_LANES-1];
 
     integer i, j;
     initial begin
         for (i=0; i<MAX_WARPS; i=i+1) begin
-            for (j=0; j<32; j=j+1) begin
+            for (j=0; j<NUM_LANES; j=j+1) begin
                 warp_nzp[i][j] = 3'b000;
             end
         end
@@ -76,10 +75,13 @@ module pc (
     // Execution Stage 2: Branch Evaluator (Combinational)
     wire is_lsu = (ex1_opcode == 8'hA0 || ex1_opcode == 8'hA1);
     wire [2:0] branch_cond = ex1_rd[2:0];
-    wire branch_take0 = ((branch_cond & warp_nzp[ex1_warp_id][0]) != 3'b000) && ex1_active_mask[0];
-    wire branch_take1 = ((branch_cond & warp_nzp[ex1_warp_id][1]) != 3'b000) && ex1_active_mask[1];
+
+    wire [NUM_LANES-1:0] branch_take;
+    for (genvar l = 0; l < NUM_LANES; l = l + 1) begin : gen_branch_take
+        assign branch_take[l] = ((branch_cond & warp_nzp[ex1_warp_id][l]) != 3'b000) && ex1_active_mask[l];
+    end
     
-    wire [31:0] comb_taken_mask = {{(32-NUM_LANES){1'b0}}, branch_take1, branch_take0};
+    wire [31:0] comb_taken_mask = {{(32-NUM_LANES){1'b0}}, branch_take};
     wire [31:0] comb_not_taken_mask = ex1_active_mask & ~comb_taken_mask;
 
     // Execution Stage 3: Write-Back signals
@@ -102,8 +104,9 @@ module pc (
             if (ex1_valid) begin
                 // 1. Update NZP Register
                 if (alu_updates_nzp) begin
-                    if (ex1_active_mask[0]) warp_nzp[ex1_warp_id][0] <= next_nzp0;
-                    if (ex1_active_mask[1]) warp_nzp[ex1_warp_id][1] <= next_nzp1;
+                    for (integer l = 0; l < NUM_LANES; l = l + 1) begin
+                        if (ex1_active_mask[l]) warp_nzp[ex1_warp_id][l] <= next_nzp[l];
+                    end
                 end
 
                 // 2. PC & State Update (Only for non-LSU instructions; LSU handles its own ctx_wb)
