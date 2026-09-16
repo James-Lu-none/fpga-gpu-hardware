@@ -90,6 +90,13 @@ module sub_partition (
         .clk (clk),
         .rst_n (core_rst_n),
         .alloc (alloc),
+        // Each cycle, warp_context picks ONE warp in STATE_READY, issues its instruction,
+        // and immediately sets that warp to STATE_STALL until retired by ctx_wb.
+        // - Intra-warp: Exactly 1 instruction in flight per warp, eliminating the need 
+        //   for complex forwarding/bypass networks or intra-warp hazard units.
+        // - Inter-warp: The pipeline datapath can still hold multiple instructions across
+        //   different stages simultaneously, as long as they belong to DIFFERENT warps 
+        //   (fine-grained multithreading / barrel execution to hide latency).
         .issue (issue),
         .ctx_wb (ctx_wb)
     );
