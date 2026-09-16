@@ -55,64 +55,143 @@ module lsu (
     reg [4:0] active_rd;
     reg is_load;
 
-    assign lsu_ready = (state == STATE_IDLE);
+    // Multi-Warp Request FIFO (Depth = MAX_WARPS)
+    // Prevents memory requests from concurrent warps from being dropped while LSU is waiting on L1/DDR3.
+    reg [$clog2(MAX_WARPS)-1:0] fifo_warp_id [0:MAX_WARPS-1];
+    reg [11:0]                  fifo_pc      [0:MAX_WARPS-1];
+    reg [4:0]                   fifo_rd      [0:MAX_WARPS-1];
+    reg                         fifo_is_load [0:MAX_WARPS-1];
+    reg [31:0]                  fifo_addr    [0:MAX_WARPS-1];
+    reg [DATA_W-1:0]            fifo_wdata   [0:MAX_WARPS-1];
+    reg                         fifo_we      [0:MAX_WARPS-1];
+
+    reg [$clog2(MAX_WARPS)-1:0] fifo_wr_ptr;
+    reg [$clog2(MAX_WARPS)-1:0] fifo_rd_ptr;
+    reg [$clog2(MAX_WARPS):0]   fifo_count;
+
+    wire op_is_mem = op.valid && (op.opcode == OP_LDR || op.opcode == OP_STR);
+    assign lsu_ready = (fifo_count < MAX_WARPS);
+
+    wire fifo_push = op_is_mem && (fifo_count < MAX_WARPS) &&
+                     ((state == STATE_WAIT) || (state == STATE_IDLE && fifo_count > 0));
+
+    wire fifo_pop = (state == STATE_IDLE && fifo_count > 0) ||
+                    (state == STATE_WAIT && l1_rsp_valid && fifo_count > 0);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state <= STATE_IDLE;
-            is_load <= 1'b0;
-            l1_req_valid <= 1'b0;
-            l1_req_we <= 1'b0;
+            state           <= STATE_IDLE;
+            is_load         <= 1'b0;
+            active_warp_id  <= '0;
+            active_pc       <= 12'd0;
+            active_rd       <= 5'd0;
+            l1_req_valid    <= 1'b0;
+            l1_req_addr     <= 32'd0;
+            l1_req_wdata    <= '0;
+            l1_req_we       <= 1'b0;
             
-            wb.valid <= 1'b0;
-            ctx_wb.valid <= 1'b0;
+            wb.valid        <= 1'b0;
+            wb.warp_id      <= '0;
+            wb.rd           <= 5'd0;
+            wb.data         <= '0;
+            wb.mask         <= 32'd0;
+            ctx_wb.valid    <= 1'b0;
+            ctx_wb.warp_id  <= '0;
+            ctx_wb.next_pc  <= 12'd0;
+            
+            fifo_wr_ptr     <= '0;
+            fifo_rd_ptr     <= '0;
+            fifo_count      <= '0;
         end else begin
-            // Default de-asserts
-            wb.valid <= 1'b0;
+            // Default 1-cycle pulses deassert
+            wb.valid     <= 1'b0;
             ctx_wb.valid <= 1'b0;
-            
+
+            // Handshake with L1 Cache Request Channel
+            if (l1_req_valid && l1_req_ready) begin
+                l1_req_valid <= 1'b0;
+            end
+
+            // 1. FIFO Enqueue Logic
+            if (fifo_push) begin
+                fifo_warp_id[fifo_wr_ptr] <= op.warp_id;
+                fifo_pc[fifo_wr_ptr]      <= op.pc;
+                fifo_rd[fifo_wr_ptr]      <= op.rd;
+                fifo_is_load[fifo_wr_ptr] <= (op.opcode == OP_LDR);
+                fifo_addr[fifo_wr_ptr]    <= op.rs1_data[31:0];
+                fifo_wdata[fifo_wr_ptr]   <= op.rs2_data;
+                fifo_we[fifo_wr_ptr]      <= (op.opcode == OP_STR);
+                fifo_wr_ptr               <= fifo_wr_ptr + 1'b1;
+            end
+
+            // 2. FIFO Count Tracking
+            if (fifo_push && !fifo_pop) begin
+                fifo_count <= fifo_count + 1'b1;
+            end else if (!fifo_push && fifo_pop) begin
+                fifo_count <= fifo_count - 1'b1;
+            end
+
+            // 3. FIFO Dequeue Logic
+            if (fifo_pop) begin
+                fifo_rd_ptr <= fifo_rd_ptr + 1'b1;
+            end
+
+            // 4. State Machine & Execution Logic
             case (state)
                 STATE_IDLE: begin
-                    if (op.valid && lsu_ready) begin
-                        if (op.opcode == OP_LDR || op.opcode == OP_STR) begin
-                            l1_req_valid <= 1'b1;
-                            l1_req_addr <= op.rs1_data[31:0]; // Use Lane 0 RS1 as Address
-                            l1_req_wdata <= op.rs2_data; // Write data
-                            l1_req_we <= (op.opcode == OP_STR);
-                            
-                            active_warp_id <= op.warp_id;
-                            active_pc <= op.pc;
-                            active_rd <= op.rd;
-                            is_load <= (op.opcode == OP_LDR);
-                            
-                            state <= STATE_WAIT;
-                        end
+                    if (fifo_pop) begin
+                        // Launch popped request from FIFO
+                        l1_req_valid   <= 1'b1;
+                        l1_req_addr    <= fifo_addr[fifo_rd_ptr];
+                        l1_req_wdata   <= fifo_wdata[fifo_rd_ptr];
+                        l1_req_we      <= fifo_we[fifo_rd_ptr];
+                        active_warp_id <= fifo_warp_id[fifo_rd_ptr];
+                        active_pc      <= fifo_pc[fifo_rd_ptr];
+                        active_rd      <= fifo_rd[fifo_rd_ptr];
+                        is_load        <= fifo_is_load[fifo_rd_ptr];
+                        state          <= STATE_WAIT;
+                    end else if (op_is_mem && fifo_count == 0) begin
+                        // Direct bypass: FIFO is empty and LSU is idle
+                        l1_req_valid   <= 1'b1;
+                        l1_req_addr    <= op.rs1_data[31:0];
+                        l1_req_wdata   <= op.rs2_data;
+                        l1_req_we      <= (op.opcode == OP_STR);
+                        active_warp_id <= op.warp_id;
+                        active_pc      <= op.pc;
+                        active_rd      <= op.rd;
+                        is_load        <= (op.opcode == OP_LDR);
+                        state          <= STATE_WAIT;
                     end
                 end
 
                 STATE_WAIT: begin
-                    if (l1_req_valid && l1_req_ready) begin
-                        l1_req_valid <= 1'b0; // Handshake complete
-                    end
-                    
                     if (l1_rsp_valid) begin
-                        // L1 operation completed
+                        // Complete active request
                         if (is_load && (active_rd != 5'd0)) begin
-                            wb.valid <= 1'b1;
+                            wb.valid   <= 1'b1;
                             wb.warp_id <= active_warp_id;
-                            wb.rd <= active_rd;
-                            wb.data <= l1_rsp_rdata;
-                            
-                            ctx_wb.valid <= 1'b1;
-                            ctx_wb.warp_id <= active_warp_id;
-                            ctx_wb.next_pc <= active_pc + 12'd1;
-                        end else begin
-                            // Store or dummy load
-                            ctx_wb.valid <= 1'b1; // Still need to wake up the warp
-                            ctx_wb.warp_id <= active_warp_id;
-                            ctx_wb.next_pc <= active_pc + 12'd1;
+                            wb.rd      <= active_rd;
+                            wb.data    <= l1_rsp_rdata;
+                            wb.mask    <= 32'hFFFFFFFF;
                         end
-                        state <= STATE_IDLE;
+                        ctx_wb.valid   <= 1'b1;
+                        ctx_wb.warp_id <= active_warp_id;
+                        ctx_wb.next_pc <= active_pc + 12'd1;
+
+                        if (fifo_pop) begin
+                            // Immediately launch next request from FIFO
+                            l1_req_valid   <= 1'b1;
+                            l1_req_addr    <= fifo_addr[fifo_rd_ptr];
+                            l1_req_wdata   <= fifo_wdata[fifo_rd_ptr];
+                            l1_req_we      <= fifo_we[fifo_rd_ptr];
+                            active_warp_id <= fifo_warp_id[fifo_rd_ptr];
+                            active_pc      <= fifo_pc[fifo_rd_ptr];
+                            active_rd      <= fifo_rd[fifo_rd_ptr];
+                            is_load        <= fifo_is_load[fifo_rd_ptr];
+                            state          <= STATE_WAIT;
+                        end else begin
+                            state          <= STATE_IDLE;
+                        end
                     end
                 end
             endcase
@@ -123,7 +202,8 @@ module lsu (
     // Debug Status Multiplexing
     assign debug_lsu_addr = l1_req_addr;
     assign debug_lsu = {
-        10'd0,
+        6'd0,
+        fifo_count[3:0],    // [25:22]: Pending FIFO queue depth
         active_pc[11:0],    // [21:10]
         4'(active_warp_id), // [9:6]
         l1_rsp_valid,       // [5]
