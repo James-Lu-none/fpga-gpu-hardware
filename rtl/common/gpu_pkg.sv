@@ -15,5 +15,5 @@ package gpu_pkg;
     parameter MAX_WARPS = 8;
     parameter NUM_REGS = 32;
     parameter IRAM_DEPTH = 1024;
-    parameter WARP_SIZE = 32;
+    parameter WARP_SIZE = NUM_LANES;
 endpackage

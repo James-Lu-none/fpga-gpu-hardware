@@ -161,7 +161,7 @@ module streaming_multiprocessor #(
         assign alloc[s].block_idx_x      = block_idx_x;
         assign alloc[s].block_idx_y      = block_idx_y;
         assign alloc[s].thread_id_start  = warp_cnt * WARP_SIZE;
-        assign alloc[s].active_mask      = 32'hFFFFFFFF;
+        assign alloc[s].active_mask      = {{(32-NUM_LANES){1'b0}}, {NUM_LANES{1'b1}}};
     end
 
     // 2. Sub-Partitions (Compute Blocks)

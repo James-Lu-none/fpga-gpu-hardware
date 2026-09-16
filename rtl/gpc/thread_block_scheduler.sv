@@ -98,9 +98,9 @@ module thread_block_scheduler (
                     if (start) begin
                         current_block_x <= 0;
                         current_block_y <= 0;
-                        // Calculate warps per block: ceil(threads / 32)
+                        // Calculate warps per block: ceil(threads / WARP_SIZE)
                         threads_per_block = block_dim_x * block_dim_y;
-                        warps_per_block <= (threads_per_block + 31) >> 5;
+                        warps_per_block <= (threads_per_block + WARP_SIZE - 1) / WARP_SIZE;
                         state <= STATE_ISSUE;
                     end
                 end

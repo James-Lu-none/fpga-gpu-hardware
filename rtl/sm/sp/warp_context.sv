@@ -93,6 +93,7 @@ module warp_context (
                 warp_block_idx_x[free_warp_idx] <= alloc.block_idx_x;
                 warp_block_idx_y[free_warp_idx] <= alloc.block_idx_y;
                 warp_thread_id_start[free_warp_idx] <= alloc.thread_id_start;
+                simt_sp[free_warp_idx] <= 3'd0;
             end
 
             // 2. Handle Feedback (Instruction Complete / Exit)

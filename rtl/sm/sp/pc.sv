@@ -70,7 +70,7 @@ module pc (
     wire branch_take0 = ((branch_cond & warp_nzp[ex1_warp_id][0]) != 3'b000) && ex1_active_mask[0];
     wire branch_take1 = ((branch_cond & warp_nzp[ex1_warp_id][1]) != 3'b000) && ex1_active_mask[1];
     
-    wire [31:0] comb_taken_mask = {30'd0, branch_take1, branch_take0};
+    wire [31:0] comb_taken_mask = {{(32-NUM_LANES){1'b0}}, branch_take1, branch_take0};
     wire [31:0] comb_not_taken_mask = ex1_active_mask & ~comb_taken_mask;
 
     // Execution Stage 3: Write-Back signals
