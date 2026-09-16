@@ -54,6 +54,8 @@ module lsu (
     reg [11:0] active_pc;
     reg [4:0] active_rd;
     reg is_load;
+    reg active_is_uniform;
+    reg active_word_sel;
 
     // Multi-Warp Request FIFO (Depth = MAX_WARPS)
     // Prevents memory requests from concurrent warps from being dropped while LSU is waiting on L1/DDR3.
@@ -64,12 +66,16 @@ module lsu (
     reg [31:0]                  fifo_addr    [0:MAX_WARPS-1];
     reg [DATA_W-1:0]            fifo_wdata   [0:MAX_WARPS-1];
     reg                         fifo_we      [0:MAX_WARPS-1];
+    reg                         fifo_is_uniform [0:MAX_WARPS-1];
+    reg                         fifo_word_sel   [0:MAX_WARPS-1];
 
     reg [$clog2(MAX_WARPS)-1:0] fifo_wr_ptr;
     reg [$clog2(MAX_WARPS)-1:0] fifo_rd_ptr;
     reg [$clog2(MAX_WARPS):0]   fifo_count;
 
     wire op_is_mem = op.valid && (op.opcode == OP_LDR || op.opcode == OP_STR);
+    wire is_uniform_req = (op.rs1_data[31:0] == op.rs1_data[63:32]);
+    wire word_sel_req   = op.rs1_data[2];
     assign lsu_ready = (fifo_count < MAX_WARPS);
 
     wire fifo_push = op_is_mem && (fifo_count < MAX_WARPS) &&
@@ -85,6 +91,8 @@ module lsu (
             active_warp_id  <= '0;
             active_pc       <= 12'd0;
             active_rd       <= 5'd0;
+            active_is_uniform <= 1'b0;
+            active_word_sel   <= 1'b0;
             l1_req_valid    <= 1'b0;
             l1_req_addr     <= 32'd0;
             l1_req_wdata    <= '0;
@@ -114,14 +122,16 @@ module lsu (
 
             // 1. FIFO Enqueue Logic
             if (fifo_push) begin
-                fifo_warp_id[fifo_wr_ptr] <= op.warp_id;
-                fifo_pc[fifo_wr_ptr]      <= op.pc;
-                fifo_rd[fifo_wr_ptr]      <= op.rd;
-                fifo_is_load[fifo_wr_ptr] <= (op.opcode == OP_LDR);
-                fifo_addr[fifo_wr_ptr]    <= op.rs1_data[31:0];
-                fifo_wdata[fifo_wr_ptr]   <= op.rs2_data;
-                fifo_we[fifo_wr_ptr]      <= (op.opcode == OP_STR);
-                fifo_wr_ptr               <= fifo_wr_ptr + 1'b1;
+                fifo_warp_id[fifo_wr_ptr]    <= op.warp_id;
+                fifo_pc[fifo_wr_ptr]         <= op.pc;
+                fifo_rd[fifo_wr_ptr]         <= op.rd;
+                fifo_is_load[fifo_wr_ptr]    <= (op.opcode == OP_LDR);
+                fifo_addr[fifo_wr_ptr]       <= op.rs1_data[31:0];
+                fifo_wdata[fifo_wr_ptr]      <= op.rs2_data;
+                fifo_we[fifo_wr_ptr]         <= (op.opcode == OP_STR);
+                fifo_is_uniform[fifo_wr_ptr] <= is_uniform_req;
+                fifo_word_sel[fifo_wr_ptr]   <= word_sel_req;
+                fifo_wr_ptr                  <= fifo_wr_ptr + 1'b1;
             end
 
             // 2. FIFO Count Tracking
@@ -141,26 +151,30 @@ module lsu (
                 STATE_IDLE: begin
                     if (fifo_pop) begin
                         // Launch popped request from FIFO
-                        l1_req_valid   <= 1'b1;
-                        l1_req_addr    <= fifo_addr[fifo_rd_ptr];
-                        l1_req_wdata   <= fifo_wdata[fifo_rd_ptr];
-                        l1_req_we      <= fifo_we[fifo_rd_ptr];
-                        active_warp_id <= fifo_warp_id[fifo_rd_ptr];
-                        active_pc      <= fifo_pc[fifo_rd_ptr];
-                        active_rd      <= fifo_rd[fifo_rd_ptr];
-                        is_load        <= fifo_is_load[fifo_rd_ptr];
-                        state          <= STATE_WAIT;
+                        l1_req_valid      <= 1'b1;
+                        l1_req_addr       <= fifo_addr[fifo_rd_ptr];
+                        l1_req_wdata      <= fifo_wdata[fifo_rd_ptr];
+                        l1_req_we         <= fifo_we[fifo_rd_ptr];
+                        active_warp_id    <= fifo_warp_id[fifo_rd_ptr];
+                        active_pc         <= fifo_pc[fifo_rd_ptr];
+                        active_rd         <= fifo_rd[fifo_rd_ptr];
+                        is_load           <= fifo_is_load[fifo_rd_ptr];
+                        active_is_uniform <= fifo_is_uniform[fifo_rd_ptr];
+                        active_word_sel   <= fifo_word_sel[fifo_rd_ptr];
+                        state             <= STATE_WAIT;
                     end else if (op_is_mem && fifo_count == 0) begin
                         // Direct bypass: FIFO is empty and LSU is idle
-                        l1_req_valid   <= 1'b1;
-                        l1_req_addr    <= op.rs1_data[31:0];
-                        l1_req_wdata   <= op.rs2_data;
-                        l1_req_we      <= (op.opcode == OP_STR);
-                        active_warp_id <= op.warp_id;
-                        active_pc      <= op.pc;
-                        active_rd      <= op.rd;
-                        is_load        <= (op.opcode == OP_LDR);
-                        state          <= STATE_WAIT;
+                        l1_req_valid      <= 1'b1;
+                        l1_req_addr       <= op.rs1_data[31:0];
+                        l1_req_wdata      <= op.rs2_data;
+                        l1_req_we         <= (op.opcode == OP_STR);
+                        active_warp_id    <= op.warp_id;
+                        active_pc         <= op.pc;
+                        active_rd         <= op.rd;
+                        is_load           <= (op.opcode == OP_LDR);
+                        active_is_uniform <= is_uniform_req;
+                        active_word_sel   <= word_sel_req;
+                        state             <= STATE_WAIT;
                     end
                 end
 
@@ -171,8 +185,15 @@ module lsu (
                             wb.valid   <= 1'b1;
                             wb.warp_id <= active_warp_id;
                             wb.rd      <= active_rd;
-                            wb.data    <= l1_rsp_rdata;
                             wb.mask    <= 32'hFFFFFFFF;
+                            if (active_is_uniform) begin
+                                // Uniform Scalar Broadcast across SIMD lanes
+                                wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]}
+                                                           : {l1_rsp_rdata[31:0],  l1_rsp_rdata[31:0]};
+                            end else begin
+                                // Contiguous Vector Load
+                                wb.data <= l1_rsp_rdata;
+                            end
                         end
                         ctx_wb.valid   <= 1'b1;
                         ctx_wb.warp_id <= active_warp_id;
@@ -180,17 +201,19 @@ module lsu (
 
                         if (fifo_pop) begin
                             // Immediately launch next request from FIFO
-                            l1_req_valid   <= 1'b1;
-                            l1_req_addr    <= fifo_addr[fifo_rd_ptr];
-                            l1_req_wdata   <= fifo_wdata[fifo_rd_ptr];
-                            l1_req_we      <= fifo_we[fifo_rd_ptr];
-                            active_warp_id <= fifo_warp_id[fifo_rd_ptr];
-                            active_pc      <= fifo_pc[fifo_rd_ptr];
-                            active_rd      <= fifo_rd[fifo_rd_ptr];
-                            is_load        <= fifo_is_load[fifo_rd_ptr];
-                            state          <= STATE_WAIT;
+                            l1_req_valid      <= 1'b1;
+                            l1_req_addr       <= fifo_addr[fifo_rd_ptr];
+                            l1_req_wdata      <= fifo_wdata[fifo_rd_ptr];
+                            l1_req_we         <= fifo_we[fifo_rd_ptr];
+                            active_warp_id    <= fifo_warp_id[fifo_rd_ptr];
+                            active_pc         <= fifo_pc[fifo_rd_ptr];
+                            active_rd         <= fifo_rd[fifo_rd_ptr];
+                            is_load           <= fifo_is_load[fifo_rd_ptr];
+                            active_is_uniform <= fifo_is_uniform[fifo_rd_ptr];
+                            active_word_sel   <= fifo_word_sel[fifo_rd_ptr];
+                            state             <= STATE_WAIT;
                         end else begin
-                            state          <= STATE_IDLE;
+                            state             <= STATE_IDLE;
                         end
                     end
                 end
