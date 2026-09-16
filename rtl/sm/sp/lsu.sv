@@ -33,6 +33,12 @@ module lsu (
 
     // Write-Back Interface to Context Scheduler
     ctx_wb_if.master ctx_wb
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Outputs
+    output wire [31:0] debug_lsu,
+    output wire [31:0] debug_lsu_addr
+`endif
 );
 
     localparam OP_LDR = 8'hA0;
@@ -112,5 +118,21 @@ module lsu (
             endcase
         end
     end
+
+`ifdef ENABLE_GPU_DEBUG
+    // Debug Status Multiplexing
+    assign debug_lsu_addr = l1_req_addr;
+    assign debug_lsu = {
+        10'd0,
+        active_pc[11:0],    // [21:10]
+        active_warp_id[3:0],// [9:6]
+        l1_rsp_valid,       // [5]
+        l1_req_ready,       // [4]
+        l1_req_valid,       // [3]
+        lsu_ready,          // [2]
+        is_load,            // [1]
+        state               // [0]
+    };
+`endif
 
 endmodule

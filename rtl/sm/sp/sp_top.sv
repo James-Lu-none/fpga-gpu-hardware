@@ -25,6 +25,14 @@ module sub_partition (
     input wire l1_req_ready,
     input wire l1_rsp_valid,
     input wire [DATA_W-1:0] l1_rsp_rdata
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Outputs
+    output wire [31:0] debug_warp_status,
+    output wire [31:0] debug_warp_extra,
+    output wire [31:0] debug_lsu,
+    output wire [31:0] debug_lsu_addr
+`endif
 );
 
     // Reset Pipeline (Level 3)
@@ -99,6 +107,11 @@ module sub_partition (
         //   (fine-grained multithreading / barrel execution to hide latency).
         .issue (issue),
         .ctx_wb (ctx_wb)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_warp_status (debug_warp_status),
+        .debug_warp_extra (debug_warp_extra)
+`endif
     );
 
     // 2. Instruction Fetch & Decode
@@ -239,6 +252,11 @@ module sub_partition (
         
         .wb (lsu_wb),
         .ctx_wb (ctx_lsu_wb)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_lsu (debug_lsu),
+        .debug_lsu_addr (debug_lsu_addr)
+`endif
     );
 
 endmodule

@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
 
+`include "gpu_debug.vh"
+
 package gpu_pkg;
     // Architecture Version Parameters
     parameter HW_VERSION_MAJOR = 32'd1;

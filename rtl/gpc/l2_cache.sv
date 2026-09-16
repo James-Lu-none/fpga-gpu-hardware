@@ -50,6 +50,11 @@ module l2_cache #(
     input wire [255:0]m_axi_rdata,
     input wire m_axi_rlast,
     output reg m_axi_rready
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Output
+    output wire [15:0] debug_l2
+`endif
 );
 
     // Round-Robin Arbiter for L1 Requests
@@ -319,5 +324,19 @@ module l2_cache #(
             endcase
         end
     end
+
+`ifdef ENABLE_GPU_DEBUG
+    // Debug Status Multiplexing
+    assign debug_l2 = {
+        m_axi_rready, m_axi_rvalid,       // [15:14]
+        m_axi_arready, m_axi_arvalid,     // [13:12]
+        m_axi_bready, m_axi_bvalid,       // [11:10]
+        m_axi_wready, m_axi_wvalid,       // [9:8]
+        m_axi_awready, m_axi_awvalid,     // [7:6]
+        req_ready_internal, req_valid,    // [5:4]
+        1'b0,                             // [3]
+        state[2:0]                        // [2:0]
+    };
+`endif
 
 endmodule

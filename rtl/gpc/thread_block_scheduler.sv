@@ -28,6 +28,11 @@ module thread_block_scheduler (
     output reg [15:0] sm_block_idx_y,
     output reg [9:0] sm_warps_per_block,
     output wire busy
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Output
+    output wire [31:0] debug_tbs
+`endif
 );
 
     assign busy = (state != STATE_IDLE);
@@ -149,5 +154,24 @@ module thread_block_scheduler (
             endcase
         end
     end
+
+`ifdef ENABLE_GPU_DEBUG
+    // Debug Status Multiplexing
+    wire [3:0] dbg_sm1_slots = (NUM_SMS > 1) ? sm_slots[1][3:0] : 4'd0;
+    wire [1:0] dbg_sm_issue  = (NUM_SMS > 1) ? sm_block_issue_valid[1:0] : {1'b0, sm_block_issue_valid[0]};
+    wire [1:0] dbg_sm_ack    = (NUM_SMS > 1) ? sm_block_accepted[1:0] : {1'b0, sm_block_accepted[0]};
+
+    assign debug_tbs = {
+        current_block_y[7:0],   // [31:24]
+        current_block_x[7:0],   // [23:16]
+        dbg_sm_issue[1:0],      // [15:14]
+        dbg_sm_ack[1:0],        // [13:12]
+        all_idle,               // [11]
+        grid_done,              // [10]
+        dbg_sm1_slots[3:0],     // [9:6]
+        sm_slots[0][3:0],       // [5:2]
+        state[1:0]              // [1:0]
+    };
+`endif
 
 endmodule

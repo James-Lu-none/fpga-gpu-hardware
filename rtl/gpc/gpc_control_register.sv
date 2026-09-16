@@ -27,6 +27,17 @@ module gpc_control_register (
 
     // Status input from Thread Block Scheduler
     input wire        grid_done_status
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Inputs
+    input wire [31:0] debug_tbs,
+    input wire [31:0] debug_sm,
+    input wire [31:0] debug_warp_status,
+    input wire [31:0] debug_warp_extra,
+    input wire [31:0] debug_lsu,
+    input wire [31:0] debug_lsu_addr,
+    input wire [31:0] debug_l1_l2
+`endif
 );
 
     // AXI4-Lite Registered Outputs
@@ -192,6 +203,15 @@ module gpc_control_register (
                         8'h18:   axi_rdata <= {16'd0, block_dim_y};
                         8'h20:   axi_rdata <= src_addr;
                         8'h24:   axi_rdata <= dst_addr;
+`ifdef ENABLE_GPU_DEBUG
+                        8'h30:   axi_rdata <= debug_tbs;
+                        8'h34:   axi_rdata <= debug_sm;
+                        8'h38:   axi_rdata <= debug_warp_status;
+                        8'h3C:   axi_rdata <= debug_warp_extra;
+                        8'h40:   axi_rdata <= debug_lsu;
+                        8'h44:   axi_rdata <= debug_lsu_addr;
+                        8'h48:   axi_rdata <= debug_l1_l2;
+`endif
                         default: axi_rdata <= 32'd0;
                     endcase
                 end else begin

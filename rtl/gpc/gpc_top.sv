@@ -44,6 +44,18 @@ module gpc_top #(
 
     wire        grid_done_status;
 
+`ifdef ENABLE_GPU_DEBUG
+    // Debug Status Interconnect
+    wire [31:0] debug_tbs;
+    wire [31:0] sm_debug_sm          [0:NUM_SM_INST-1];
+    wire [31:0] sm_debug_warp_status [0:NUM_SM_INST-1];
+    wire [31:0] sm_debug_warp_extra  [0:NUM_SM_INST-1];
+    wire [31:0] sm_debug_lsu         [0:NUM_SM_INST-1];
+    wire [31:0] sm_debug_lsu_addr    [0:NUM_SM_INST-1];
+    wire [15:0] sm_debug_l1          [0:NUM_SM_INST-1];
+    wire [15:0] debug_l2;
+`endif
+
     gpc_control_register u_gpc_ctrl (
         .clk              (clk),
         .rst_n            (gpc_rst_n),
@@ -60,6 +72,16 @@ module gpc_top #(
         .iram_waddr       (iram_waddr_reg),
         .iram_wdata       (iram_wdata_reg),
         .grid_done_status (grid_done_status)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_tbs         (debug_tbs),
+        .debug_sm          (sm_debug_sm[0]),
+        .debug_warp_status (sm_debug_warp_status[0]),
+        .debug_warp_extra  (sm_debug_warp_extra[0]),
+        .debug_lsu         (sm_debug_lsu[0]),
+        .debug_lsu_addr    (sm_debug_lsu_addr[0]),
+        .debug_l1_l2       ({sm_debug_l1[0], debug_l2})
+`endif
     );
 
     // 2. Dynamic Thread Block Scheduler (TBS / GigaThread Engine)
@@ -86,6 +108,10 @@ module gpc_top #(
         .sm_block_idx_y (sm_block_idx_y),
         .sm_warps_per_block (sm_warps_per_block),
         .busy (gpc_busy)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_tbs (debug_tbs)
+`endif
     );
 
     // 3. Parameterized SM Array (NUM_SM_INST SMs)
@@ -128,6 +154,15 @@ module gpc_top #(
             .l1_req_ready         (sm_l1_req_ready[n]),
             .l1_rsp_valid         (sm_l1_rsp_valid[n]),
             .l1_rsp_rdata         (sm_l1_rsp_rdata[n])
+`ifdef ENABLE_GPU_DEBUG
+            ,
+            .debug_sm             (sm_debug_sm[n]),
+            .debug_warp_status    (sm_debug_warp_status[n]),
+            .debug_warp_extra     (sm_debug_warp_extra[n]),
+            .debug_lsu            (sm_debug_lsu[n]),
+            .debug_lsu_addr       (sm_debug_lsu_addr[n]),
+            .debug_l1             (sm_debug_l1[n])
+`endif
         );
     end
 
@@ -137,7 +172,12 @@ module gpc_top #(
     ) u_l2_cache (
         .clk             (clk),
         .rst_n           (gpc_rst_n),
-        .flush           (cache_flush),
+        .flush           (cache_flush)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_l2        (debug_l2)
+`endif
+        ,
         
         .sm_req_valid    (sm_l1_req_valid),
         .sm_req_addr     (sm_l1_req_addr),

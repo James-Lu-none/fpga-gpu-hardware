@@ -38,6 +38,16 @@ module streaming_multiprocessor #(
     input wire l1_req_ready,
     input wire l1_rsp_valid,
     input wire [255:0]l1_rsp_rdata
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Outputs
+    output wire [31:0] debug_sm,
+    output wire [31:0] debug_warp_status,
+    output wire [31:0] debug_warp_extra,
+    output wire [31:0] debug_lsu,
+    output wire [31:0] debug_lsu_addr,
+    output wire [15:0] debug_l1
+`endif
 );
 
     // Reset Pipeline (Level 2)
@@ -173,6 +183,13 @@ module streaming_multiprocessor #(
     wire [NUM_SPS-1:0]        sp_l1_rsp_valid;
     wire [DATA_W-1:0]         sp_l1_rsp_rdata [0:NUM_SPS-1];
 
+`ifdef ENABLE_GPU_DEBUG
+    wire [31:0] sp_debug_warp_status [0:NUM_SPS-1];
+    wire [31:0] sp_debug_warp_extra  [0:NUM_SPS-1];
+    wire [31:0] sp_debug_lsu         [0:NUM_SPS-1];
+    wire [31:0] sp_debug_lsu_addr    [0:NUM_SPS-1];
+`endif
+
     for (genvar m = 0; m < NUM_SPS; m = m + 1) begin : gen_sub_partitions
         sub_partition u_sp (
             .clk           (clk),
@@ -194,8 +211,34 @@ module streaming_multiprocessor #(
             .l1_req_ready  (sp_l1_req_ready[m]),
             .l1_rsp_valid  (sp_l1_rsp_valid[m]),
             .l1_rsp_rdata  (sp_l1_rsp_rdata[m])
+`ifdef ENABLE_GPU_DEBUG
+            ,
+            // Debug Status Outputs
+            .debug_warp_status (sp_debug_warp_status[m]),
+            .debug_warp_extra  (sp_debug_warp_extra[m]),
+            .debug_lsu         (sp_debug_lsu[m]),
+            .debug_lsu_addr    (sp_debug_lsu_addr[m])
+`endif
         );
     end
+
+`ifdef ENABLE_GPU_DEBUG
+    assign debug_warp_status = sp_debug_warp_status[0];
+    assign debug_warp_extra  = sp_debug_warp_extra[0];
+    assign debug_lsu         = sp_debug_lsu[0];
+    assign debug_lsu_addr    = sp_debug_lsu_addr[0];
+
+    assign debug_sm = {
+        12'd0,
+        warps_per_block[4:0],       // [19:15]
+        available_warp_slots[4:0],  // [14:10]
+        block_accepted_reg,         // [9]
+        alloc_valid_reg,            // [8]
+        alloc_ready,                // [7]
+        warp_cnt[3:0],              // [6:3]
+        rx_state[2:0]               // [2:0]
+    };
+`endif
 
     // 3. M:1 L1 Cache Arbiter & Interconnect
     wire              l1_req_valid_int;
@@ -299,6 +342,10 @@ module streaming_multiprocessor #(
         .l2_req_ready (l1_req_ready),
         .l2_rsp_valid (l1_rsp_valid),
         .l2_rsp_rdata (l1_rsp_rdata)
+`ifdef ENABLE_GPU_DEBUG
+        ,
+        .debug_l1     (debug_l1)
+`endif
     );
 
 endmodule

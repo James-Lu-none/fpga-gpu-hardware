@@ -30,6 +30,11 @@ module l1_cache (
 
     input wire l2_rsp_valid,
     input wire [255:0] l2_rsp_rdata
+`ifdef ENABLE_GPU_DEBUG
+    ,
+    // Debug Status Output
+    output wire [15:0] debug_l1
+`endif
 );
 
     // Cache Parameters & Breakdown
@@ -211,5 +216,19 @@ module l1_cache (
             endcase
         end
     end
+
+`ifdef ENABLE_GPU_DEBUG
+    // Debug Status Multiplexing
+    assign debug_l1 = {
+        8'd0,
+        l2_rsp_valid,     // [7]
+        l2_req_ready,     // [6]
+        l2_req_valid,     // [5]
+        rsp_valid,        // [4]
+        req_ready,        // [3]
+        req_we_q,         // [2]
+        state[1:0]        // [1:0]
+    };
+`endif
 
 endmodule
