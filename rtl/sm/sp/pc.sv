@@ -46,6 +46,7 @@ module pc (
 
     // Execution Stage 1: Pipeline Registers for Operand Data
     reg ex1_valid;
+    reg [7:0] ex1_opcode;
     reg [3:0] ex1_warp_id;
     reg [4:0] ex1_rd;
     reg [31:0] ex1_imm;
@@ -55,8 +56,15 @@ module pc (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ex1_valid <= 1'b0;
+            ex1_opcode <= 8'd0;
+            ex1_warp_id <= 4'd0;
+            ex1_rd <= 5'd0;
+            ex1_imm <= 32'd0;
+            ex1_active_mask <= 32'd0;
+            ex1_pc <= 12'd0;
         end else begin
             ex1_valid <= op.valid;
+            ex1_opcode <= op.opcode;
             ex1_warp_id <= op.warp_id;
             ex1_rd <= op.rd;
             ex1_imm <= op.imm;
@@ -66,6 +74,7 @@ module pc (
     end
 
     // Execution Stage 2: Branch Evaluator (Combinational)
+    wire is_lsu = (ex1_opcode == 8'hA0 || ex1_opcode == 8'hA1);
     wire [2:0] branch_cond = ex1_rd[2:0];
     wire branch_take0 = ((branch_cond & warp_nzp[ex1_warp_id][0]) != 3'b000) && ex1_active_mask[0];
     wire branch_take1 = ((branch_cond & warp_nzp[ex1_warp_id][1]) != 3'b000) && ex1_active_mask[1];
@@ -97,32 +106,34 @@ module pc (
                     if (ex1_active_mask[1]) warp_nzp[ex1_warp_id][1] <= next_nzp1;
                 end
 
-                // 2. PC & State Update
-                ctx_wb.valid <= 1'b1;
-                ctx_wb.warp_id <= ex1_warp_id;
-                ctx_wb.is_done <= is_exit;
-                
-                // Branch & Sync Logic (Divergence Tester)
-                if (is_sync) begin
-                    ctx_wb.is_sync <= 1'b1;
-                    ctx_wb.next_pc <= ex1_pc + 12'd1;
-                end else if (is_branch) begin
-                    if (comb_taken_mask != 32'd0 && comb_not_taken_mask != 32'd0) begin
-                        // Divergence!
-                        ctx_wb.is_divergent <= 1'b1;
-                        ctx_wb.taken_mask <= comb_taken_mask;
-                        ctx_wb.not_taken_mask <= comb_not_taken_mask;
-                        ctx_wb.next_pc <= ex1_pc + ex1_imm[11:0]; // Taken path executes first
-                    end else if (comb_taken_mask != 32'd0) begin
-                        // All active threads take the branch (No Divergence)
-                        ctx_wb.next_pc <= ex1_pc + ex1_imm[11:0];
+                // 2. PC & State Update (Only for non-LSU instructions; LSU handles its own ctx_wb)
+                if (!is_lsu) begin
+                    ctx_wb.valid <= 1'b1;
+                    ctx_wb.warp_id <= ex1_warp_id;
+                    ctx_wb.is_done <= is_exit;
+                    
+                    // Branch & Sync Logic (Divergence Tester)
+                    if (is_sync) begin
+                        ctx_wb.is_sync <= 1'b1;
+                        ctx_wb.next_pc <= ex1_pc + 12'd1;
+                    end else if (is_branch) begin
+                        if (comb_taken_mask != 32'd0 && comb_not_taken_mask != 32'd0) begin
+                            // Divergence!
+                            ctx_wb.is_divergent <= 1'b1;
+                            ctx_wb.taken_mask <= comb_taken_mask;
+                            ctx_wb.not_taken_mask <= comb_not_taken_mask;
+                            ctx_wb.next_pc <= ex1_pc + ex1_imm[11:0]; // Taken path executes first
+                        end else if (comb_taken_mask != 32'd0) begin
+                            // All active threads take the branch (No Divergence)
+                            ctx_wb.next_pc <= ex1_pc + ex1_imm[11:0];
+                        end else begin
+                            // All active threads don't take the branch
+                            ctx_wb.next_pc <= ex1_pc + 12'd1;
+                        end
                     end else begin
-                        // All active threads don't take the branch
+                        // Normal execution
                         ctx_wb.next_pc <= ex1_pc + 12'd1;
                     end
-                end else begin
-                    // Normal execution
-                    ctx_wb.next_pc <= ex1_pc + 12'd1;
                 end
             end
         end

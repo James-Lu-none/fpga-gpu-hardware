@@ -17,7 +17,7 @@ module lsu (
     operand_if.slave op,
     output wire lsu_ready, // LSU can accept new instruction
 
-    // L1 Cache Interface
+    // request signal to SM wise L1 Cache
     output reg l1_req_valid,
     output reg [31:0] l1_req_addr,
     output reg [DATA_W-1:0] l1_req_wdata,
@@ -27,8 +27,11 @@ module lsu (
     input wire l1_rsp_valid,
     input wire [DATA_W-1:0] l1_rsp_rdata,
 
-    // Write-Back Interface (To VRF and Context Scheduler)
+    // Write-Back Interface to VRF
+    // with target warp_id, target register number (rd)
     wb_if.master wb,
+
+    // Write-Back Interface to Context Scheduler
     ctx_wb_if.master ctx_wb
 );
 
