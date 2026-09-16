@@ -161,6 +161,18 @@ module top (
     assign dwconv_xbar_axi.awid = 1'b0;
     assign dwconv_xbar_axi.arid = 1'b0;
 
+    // Tie off floating control & ID inputs for S00 (GPU Core to Crossbar)
+    assign gpu_xbar_axi.awid    = 1'b0;
+    assign gpu_xbar_axi.awlock  = 1'b0;
+    assign gpu_xbar_axi.awcache = 4'b0011; // Normal non-cacheable bufferable
+    assign gpu_xbar_axi.awprot  = 3'b000;  // Unprivileged, secure, data
+    assign gpu_xbar_axi.awqos   = 4'b0000;
+    assign gpu_xbar_axi.arid    = 1'b0;
+    assign gpu_xbar_axi.arlock  = 1'b0;
+    assign gpu_xbar_axi.arcache = 4'b0011;
+    assign gpu_xbar_axi.arprot  = 3'b000;
+    assign gpu_xbar_axi.arqos   = 4'b0000;
+
     // 3. PCIe XDMA Subsystem IP Instance (xdma_0)
     xdma_0 u_xdma (
         .sys_clk (pcie_ref_clk),
