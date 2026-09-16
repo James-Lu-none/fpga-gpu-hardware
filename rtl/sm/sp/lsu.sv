@@ -125,7 +125,7 @@ module lsu (
     assign debug_lsu = {
         10'd0,
         active_pc[11:0],    // [21:10]
-        active_warp_id[3:0],// [9:6]
+        4'(active_warp_id), // [9:6]
         l1_rsp_valid,       // [5]
         l1_req_ready,       // [4]
         l1_req_valid,       // [3]

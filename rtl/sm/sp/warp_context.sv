@@ -188,9 +188,9 @@ module warp_context (
         warp_mask[0][15:0],          // [31:16]: Warp 0 active mask
         rr_idx[3:0],                 // [15:12]: Round-robin pointer
         ctx_wb.valid,                // [11]: ctx_wb valid
-        ctx_wb.warp_id[2:0],         // [10:8]: ctx_wb warp_id
+        3'(ctx_wb.warp_id),          // [10:8]: ctx_wb warp_id
         issue.valid,                 // [7]: issue valid
-        issue.warp_id[2:0],          // [6:4]: issue warp_id
+        3'(issue.warp_id),           // [6:4]: issue warp_id
         warp_state[2][1:0],          // [3:2]: Warp 2 state
         warp_state[3][1:0]           // [1:0]: Warp 3 state
     };
