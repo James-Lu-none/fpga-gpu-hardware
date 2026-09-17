@@ -62,6 +62,7 @@ module lsu (
     reg [31:0] active_rs2_lane1;
 
     // Multi-Warp Request FIFO (Depth = MAX_WARPS)
+    // Prevents memory requests from concurrent warps from being dropped while LSU is waiting on L1/DDR3.
     reg [$clog2(MAX_WARPS)-1:0] fifo_warp_id [0:MAX_WARPS-1];
     reg [11:0]                  fifo_pc      [0:MAX_WARPS-1];
     reg [4:0]                   fifo_rd      [0:MAX_WARPS-1];
@@ -86,7 +87,7 @@ module lsu (
                      ((state == STATE_WAIT) || (state == STATE_IDLE && fifo_count > 0));
 
     wire fifo_pop = (state == STATE_IDLE && fifo_count > 0) ||
-                    (state == STATE_WAIT && l1_rsp_valid && fifo_count > 0);
+                    (state == STATE_WAIT && l1_rsp_valid && !active_lane1_pending && fifo_count > 0);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
