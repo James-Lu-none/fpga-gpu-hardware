@@ -178,6 +178,7 @@ module streaming_multiprocessor #(
     wire [NUM_SPS-1:0]        sp_l1_req_valid;
     wire [31:0]               sp_l1_req_addr  [0:NUM_SPS-1];
     wire [DATA_W-1:0]         sp_l1_req_wdata [0:NUM_SPS-1];
+    wire [7:0]               sp_l1_req_wstrb [0:NUM_SPS-1];
     wire [NUM_SPS-1:0]        sp_l1_req_we;
     wire [NUM_SPS-1:0]        sp_l1_req_ready;
     wire [NUM_SPS-1:0]        sp_l1_rsp_valid;
@@ -207,6 +208,7 @@ module streaming_multiprocessor #(
             .l1_req_valid  (sp_l1_req_valid[m]),
             .l1_req_addr   (sp_l1_req_addr[m]),
             .l1_req_wdata  (sp_l1_req_wdata[m]),
+            .l1_req_wstrb  (sp_l1_req_wstrb[m]),
             .l1_req_we     (sp_l1_req_we[m]),
             .l1_req_ready  (sp_l1_req_ready[m]),
             .l1_rsp_valid  (sp_l1_rsp_valid[m]),
@@ -244,6 +246,7 @@ module streaming_multiprocessor #(
     wire              l1_req_valid_int;
     wire [31:0]       l1_req_addr_int;
     wire [DATA_W-1:0] l1_req_wdata_int;
+    wire [7:0]        l1_req_wstrb_int;
     wire              l1_req_we_int;
     wire              l1_req_ready_int;
     wire              l1_rsp_valid_int;
@@ -255,6 +258,7 @@ module streaming_multiprocessor #(
             assign l1_req_addr_int     = sp_l1_req_addr[0];
             assign l1_req_wdata_int    = sp_l1_req_wdata[0];
             assign l1_req_we_int       = sp_l1_req_we[0];
+            assign l1_req_wstrb_int = sp_l1_req_wstrb[0];
             assign sp_l1_req_ready[0]  = l1_req_ready_int;
             assign sp_l1_rsp_valid[0]  = l1_rsp_valid_int;
             assign sp_l1_rsp_rdata[0]  = l1_rsp_rdata_int;
@@ -286,6 +290,7 @@ module streaming_multiprocessor #(
             assign l1_req_valid_int = (arb_state == ARB_IDLE) && client_found;
             assign l1_req_addr_int  = sp_l1_req_addr[sel_client];
             assign l1_req_wdata_int = sp_l1_req_wdata[sel_client];
+            assign l1_req_wstrb_int = sp_l1_req_wstrb[sel_client];
             assign l1_req_we_int    = sp_l1_req_we[sel_client];
 
             for (genvar c = 0; c < NUM_SPS; c = c + 1) begin : gen_sp_ready_rsp
@@ -329,6 +334,7 @@ module streaming_multiprocessor #(
         .req_valid (l1_req_valid_int),
         .req_addr (l1_req_addr_int),
         .req_wdata (l1_req_wdata_int),
+        .req_wstrb (l1_req_wstrb_int),
         .req_we (l1_req_we_int),
         .req_ready (l1_req_ready_int),
         .rsp_valid (l1_rsp_valid_int),
