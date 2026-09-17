@@ -108,13 +108,15 @@ interface ctx_wb_if;
     logic [31:0] taken_mask;
     logic [31:0] not_taken_mask;
     logic is_sync;
+    logic is_ssy;
+    logic [11:0] target_pc;
     
     modport master (
         output valid, warp_id, next_pc, is_done, is_divergent, 
-        output taken_mask, not_taken_mask, is_sync
+        output taken_mask, not_taken_mask, is_sync, is_ssy, target_pc
     );
     modport slave (
         input  valid, warp_id, next_pc, is_done, is_divergent, 
-        input  taken_mask, not_taken_mask, is_sync
+        input  taken_mask, not_taken_mask, is_sync, is_ssy, target_pc
     );
 endinterface

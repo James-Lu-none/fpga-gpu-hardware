@@ -92,6 +92,8 @@ module sub_partition (
     assign ctx_wb.not_taken_mask = ctx_lsu_wb.valid ? 32'd0                     : ctx_alu_wb.not_taken_mask;
     assign ctx_wb.is_divergent   = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_divergent;
     assign ctx_wb.is_sync        = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_sync;
+    assign ctx_wb.is_ssy         = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_ssy;
+    assign ctx_wb.target_pc      = ctx_lsu_wb.valid ? 12'd0                     : ctx_alu_wb.target_pc;
 
     // 1. Warp Context & Dynamic Scheduler
     warp_context u_warp_context (
@@ -143,6 +145,7 @@ module sub_partition (
     localparam OP_S2R  = 8'hB0;
     localparam OP_BR   = 8'hC0;
     localparam OP_SYNC = 8'hE0;
+    localparam OP_SSY  = 8'hE1;
     localparam OP_EXIT = 8'hFF;
 
     // Warp-level EX1 Stage Registers
@@ -169,6 +172,7 @@ module sub_partition (
     wire is_exit   = ex1_valid && (ex1_opcode == OP_EXIT);
     wire is_branch = ex1_valid && (ex1_opcode == OP_BR);
     wire is_sync   = ex1_valid && (ex1_opcode == OP_SYNC);
+    wire is_ssy    = ex1_valid && (ex1_opcode == OP_SSY);
     wire alu_writes_reg = (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_MUL || ex1_opcode == OP_S2R);
 
     // Generate K ALU Lanes
@@ -230,6 +234,7 @@ module sub_partition (
         .is_exit         (is_exit),
         .is_branch       (is_branch),
         .is_sync         (is_sync),
+        .is_ssy          (is_ssy),
         .ctx_wb          (ctx_alu_wb)
     );
 

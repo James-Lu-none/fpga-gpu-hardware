@@ -25,6 +25,7 @@ module pc (
     input wire is_exit,
     input wire is_branch,
     input wire is_sync,
+    input wire is_ssy,
 
     // Context Write-Back (Signals sent to the warp_context scheduler)
     ctx_wb_if.master ctx_wb
@@ -95,10 +96,13 @@ module pc (
             ctx_wb.not_taken_mask <= 32'd0;
             ctx_wb.is_divergent <= 1'b0;
             ctx_wb.is_sync <= 1'b0;
+            ctx_wb.is_ssy <= 1'b0;
+            ctx_wb.target_pc <= 12'd0;
         end else begin
             ctx_wb.valid <= 1'b0;
             ctx_wb.is_divergent <= 1'b0;
             ctx_wb.is_sync <= 1'b0;
+            ctx_wb.is_ssy <= 1'b0;
 
             // Wait for ex1_valid (since ALU signals also arrive in EX2 based on ex1_valid)
             if (ex1_valid) begin
@@ -115,8 +119,12 @@ module pc (
                     ctx_wb.warp_id <= ex1_warp_id;
                     ctx_wb.is_done <= is_exit;
                     
-                    // Branch & Sync Logic (Divergence Tester)
-                    if (is_sync) begin
+                    // Branch & Sync & SSY Logic (Divergence Tester)
+                    if (is_ssy) begin
+                        ctx_wb.is_ssy <= 1'b1;
+                        ctx_wb.next_pc <= ex1_pc + 12'd1;
+                        ctx_wb.target_pc <= ex1_pc + ex1_imm[11:0];
+                    end else if (is_sync) begin
                         ctx_wb.is_sync <= 1'b1;
                         ctx_wb.next_pc <= ex1_pc + 12'd1;
                     end else if (is_branch) begin

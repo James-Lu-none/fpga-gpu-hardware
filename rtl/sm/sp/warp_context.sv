@@ -109,6 +109,14 @@ module warp_context (
             if (ctx_wb.valid) begin
                 if (ctx_wb.is_done) begin
                     warp_state[ctx_wb.warp_id] <= STATE_DONE;
+                end else if (ctx_wb.is_ssy) begin
+                    // SSY: Push Reconvergence PC and current mask to stack
+                    if (simt_sp[ctx_wb.warp_id] < 3'd4) begin
+                        simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id]] <= {ctx_wb.target_pc, warp_mask[ctx_wb.warp_id]};
+                        simt_sp[ctx_wb.warp_id] <= simt_sp[ctx_wb.warp_id] + 3'd1;
+                    end
+                    warp_pc[ctx_wb.warp_id] <= ctx_wb.next_pc;
+                    warp_state[ctx_wb.warp_id] <= STATE_READY;
                 end else if (ctx_wb.is_divergent) begin
                     // Divergence: Push Not_Taken path to Stack
                     if (simt_sp[ctx_wb.warp_id] < 3'd4) begin

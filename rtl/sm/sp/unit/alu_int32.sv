@@ -55,6 +55,7 @@ module alu_int32 #(
     localparam OP_S2R = 8'hB0;
     localparam OP_BR = 8'hC0;
     localparam OP_SYNC = 8'hE0;
+    localparam OP_SSY = 8'hE1;
     localparam OP_EXIT = 8'hFF;
 
     // Execution Stage 1: Arithmetic Execution (Pipelined to break DSP critical path)
@@ -111,6 +112,10 @@ module alu_int32 #(
             OP_SUB, OP_CMP: begin
                 result    = ex1_sub;
                 _eval_nzp = 1'b1;
+            end
+            OP_BR, OP_SYNC, OP_SSY, OP_EXIT: begin
+                // Control flow instructions do not write to registers
+                // Handled by sp_top / pc logic
             end
             OP_MUL: begin
                 result    = ex1_mul;
