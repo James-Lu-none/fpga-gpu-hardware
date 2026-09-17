@@ -4,7 +4,7 @@
 
 package gpu_pkg;
     // Architecture Version Parameters
-    parameter HW_VERSION_MAJOR = 32'd1;
+    parameter HW_VERSION_MAJOR = 32'd2;
     parameter HW_VERSION_MINOR = 32'd0;
 
     // Architecture Hierarchy Parameters (N, M, K)
