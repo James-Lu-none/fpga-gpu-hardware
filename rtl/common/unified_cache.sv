@@ -39,6 +39,8 @@ module unified_cache #(
     wire [INDEX_BITS-1:0] core_index = core.req_addr[5 +: INDEX_BITS];
     wire [TAG_BITS-1:0] core_tag = core.req_addr[5 + INDEX_BITS +: TAG_BITS];
     wire [ADDR_W-1:0] req_line_addr = {req_addr_q[ADDR_W-1:5], 5'd0};
+    wire core_req_fire = core.req_valid && core.req_ready;
+    wire memory_rsp_fire = memory.rsp_valid && memory.rsp_ready;
 
     assign core.req_ready = (state == ST_IDLE);
     assign memory.req_valid = (state == ST_READ_MEM) || (state == ST_WRITE_MEM);
@@ -52,17 +54,21 @@ module unified_cache #(
     initial begin
         for (i = 0; i < NUM_LINES; i = i + 1) begin
             valid_ram[i] = 1'b0;
-            tag_ram[i] = '0;
-            data_ram[i] = '0;
         end
     end
 
+    // Keep each inferred RAM in one process. Reset/flush only invalidate lines;
+    // clearing the wide data RAM would prevent block RAM inference.
     always @(posedge clk) begin
-        if (state == ST_IDLE && core.req_valid && core.req_ready) begin
+        if (core_req_fire) begin
             data_dout <= data_ram[core_index];
             tag_dout <= tag_ram[core_index];
-            valid_dout <= valid_ram[core_index];
         end
+        if (memory_rsp_fire) begin
+            data_ram[req_index_q] <= memory.rsp_rdata;
+            tag_ram[req_index_q] <= req_tag_q;
+        end
+        valid_dout <= valid_ram[core_index];
     end
 
     always @(posedge clk or negedge rst_n) begin
@@ -124,8 +130,6 @@ module unified_cache #(
 
                 ST_WAIT_MEM: begin
                     if (memory.rsp_valid && memory.rsp_ready) begin
-                        data_ram[req_index_q] <= memory.rsp_rdata;
-                        tag_ram[req_index_q] <= req_tag_q;
                         valid_ram[req_index_q] <= 1'b1;
                         core.rsp_valid <= 1'b1;
                         core.rsp_rdata <= memory.rsp_rdata;
