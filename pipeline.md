@@ -16,7 +16,7 @@ Host (x86_64 Linux) -> PCIe XDMA -> Mailbox BRAM (0x3F00)
 
 ### 1. Host to RISC-V Command Processor (PCIe XDMA -> Mailbox -> IRQ)
 
-- Host driver (vgpu_core.ko) writes a 64-byte aligned task descriptor to Mailbox BRAM at address 0x3F00 via PCIe XDMA BAR0 MMIO.
+- Host driver (fpgagpu_core.ko) writes a 64-byte aligned task descriptor to Mailbox BRAM at address 0x3F00 via PCIe XDMA BAR0 MMIO.
 - Hardware in gpu_top.sv sniffs AXI-Lite writes to the mailbox range:
   When s_axi_lite.awaddr[15:0] == 16'h3F00, it pulses doorbell_irq_reg <= 1'b1 for 1 cycle.
   This signal is hardwired directly to picorv32_axi.irq[0].

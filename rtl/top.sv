@@ -4,7 +4,7 @@
 // Create Date: 2026/08/25
 // Design Name: Pure Verilog Top Level GPGPU SoC Wrapper
 // Module Name: top
-// Project Name: fpga-gpu (Accelerated Computing with Linux Kernel vGPU-Core)
+// Project Name: fpga-gpu (Accelerated Computing with Linux Kernel fpgagpu-Core)
 // Target Devices: Xilinx Artix-7 (XC7A200T-2FBG484)
 // Tool Versions: Vivado 2026+
 // Description: 
