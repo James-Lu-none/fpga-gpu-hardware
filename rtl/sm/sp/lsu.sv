@@ -43,6 +43,9 @@ module lsu (
     localparam ST_IDLE = 2'd0;
     localparam ST_ISSUE = 2'd1;
     localparam ST_WAIT = 2'd2;
+    // One warp can have only one instruction in flight in warp_context. The
+    // FIFO therefore needs to hold at most one memory operation per resident
+    // warp while the active engine waits for L1/DDR latency.
     localparam FIFO_DEPTH = MAX_WARPS;
     localparam FIFO_PTR_W = (FIFO_DEPTH > 1) ? $clog2(FIFO_DEPTH) : 1;
 
@@ -59,6 +62,9 @@ module lsu (
     reg [31:0] lane1_wdata;
     reg [31:0] lane0_rdata;
 
+    // The FIFO stores the complete instruction context. The active engine
+    // must not read the operand interface again after the warp has stalled,
+    // because the operand bus is reused by later warps every cycle.
     reg [$clog2(MAX_WARPS)-1:0] fifo_warp_id [0:FIFO_DEPTH-1];
     reg [11:0] fifo_pc [0:FIFO_DEPTH-1];
     reg [4:0] fifo_rd [0:FIFO_DEPTH-1];
@@ -79,6 +85,8 @@ module lsu (
     wire word_sel = op.rs1_data[2];
     wire is_uniform = (op.rs1_data[31:0] == op.rs1_data[63:32]);
 
+    // FIFO enqueue and active-engine dequeue are intentionally independent:
+    // different warps may continue issuing while one request waits on L1.
     wire fifo_push = op_is_mem && (fifo_count < FIFO_DEPTH);
     wire fifo_pop = (state == ST_IDLE) && (fifo_count != 0);
     assign lsu_ready = (fifo_count < FIFO_DEPTH);
@@ -143,6 +151,8 @@ module lsu (
             case (state)
                 ST_IDLE: begin
                     if (fifo_pop) begin
+                        // Pop only in IDLE. Once loaded, this context remains
+                        // stable through request acceptance and response wait.
                         active_is_load <= fifo_is_load[fifo_rd_ptr];
                         active_is_uniform <= fifo_is_uniform[fifo_rd_ptr];
                         active_lane1_pending <= !fifo_is_uniform[fifo_rd_ptr];
@@ -164,6 +174,8 @@ module lsu (
                 end
 
                 ST_ISSUE: begin
+                    // Keep VALID asserted until L1 accepts the request. This
+                    // is required because an L1 miss can backpressure here.
                     if (request_fire) begin
                         l1_req_valid <= 1'b0;
                         state <= ST_WAIT;
@@ -171,6 +183,9 @@ module lsu (
                 end
 
                 ST_WAIT: begin
+                    // A response completes the current lane request. A
+                    // divergent warp gets a second request before its single
+                    // context write-back is emitted.
                     if (response_fire) begin
                         if (active_lane1_pending) begin
                             if (active_is_load && active_rd != 5'd0)

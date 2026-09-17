@@ -31,12 +31,29 @@ module l1_cache (
     wire [4:0] req_offset = req_addr[4:0];
     wire [1:0] req_qword = req_offset[4:3];
     reg [1:0] rsp_qword_q;
+    reg l2_rsp_pending;
+    reg [255:0] l2_rsp_data_q;
 
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n)
+        if (!rst_n) begin
             rsp_qword_q <= 2'd0;
-        else if (core_bus.req_valid && core_bus.req_ready)
-            rsp_qword_q <= req_qword;
+            l2_rsp_pending <= 1'b0;
+            l2_rsp_data_q <= '0;
+        end else begin
+            if (core_bus.req_valid && core_bus.req_ready)
+                rsp_qword_q <= req_qword;
+
+            // L2 currently exposes a pulse response. Hold it until the
+            // unified cache consumes it, so AXI completion cannot be lost at
+            // the L1/L2 clock-edge boundary. This is especially important for
+            // stores, because losing the response leaves LSU in ST_WAIT.
+            if (l2_rsp_valid) begin
+                l2_rsp_pending <= 1'b1;
+                l2_rsp_data_q <= l2_rsp_rdata;
+            end else if (l2_rsp_pending && l2_bus.rsp_ready) begin
+                l2_rsp_pending <= 1'b0;
+            end
+        end
     end
 
     assign core_bus.req_valid = req_valid;
@@ -57,8 +74,8 @@ module l1_cache (
     assign l2_req_wstrb = l2_bus.req_wstrb;
     assign l2_req_we = l2_bus.req_we;
     assign l2_bus.req_ready = l2_req_ready;
-    assign l2_bus.rsp_valid = l2_rsp_valid;
-    assign l2_bus.rsp_rdata = l2_rsp_rdata;
+    assign l2_bus.rsp_valid = l2_rsp_pending;
+    assign l2_bus.rsp_rdata = l2_rsp_data_q;
 
     unified_cache #(
         .NUM_LINES (64),

@@ -58,7 +58,9 @@ module unified_cache #(
     end
 
     // Keep each inferred RAM in one process. Reset/flush only invalidate lines;
-    // clearing the wide data RAM would prevent block RAM inference.
+    // clearing the wide data RAM would prevent block RAM inference. The cache
+    // controller itself stays separate from the RAM template so L1 and L2 can
+    // share this module with different line counts and tag widths.
     always @(posedge clk) begin
         if (core_req_fire) begin
             data_dout <= data_ram[core_index];
