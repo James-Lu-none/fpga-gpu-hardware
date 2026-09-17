@@ -60,6 +60,7 @@ module lsu (
     reg active_lane1_pending;
     reg [31:0] active_rs1_lane1;
     reg [31:0] active_rs2_lane1;
+    reg [31:0] pending_lane0_rdata;
 
     // Multi-Warp Request FIFO (Depth = MAX_WARPS)
     // Prevents memory requests from concurrent warps from being dropped while LSU is waiting on L1/DDR3.
@@ -194,22 +195,12 @@ module lsu (
 
                 STATE_WAIT: begin
                     if (l1_rsp_valid) begin
-                        // Complete active request
-                        if (is_load && (active_rd != 5'd0)) begin
-                            wb.valid   <= 1'b1;
-                            wb.warp_id <= active_warp_id;
-                            wb.rd      <= active_rd;
-                            wb.mask    <= 32'hFFFFFFFF;
-                            if (active_is_uniform) begin
-                                // Uniform Scalar Broadcast across SIMD lanes
-                                wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]}
-                                                           : {l1_rsp_rdata[31:0],  l1_rsp_rdata[31:0]};
-                            end else begin
-                                // Contiguous Vector Load
-                                wb.data <= l1_rsp_rdata;
-                            end
-                        end
                         if (active_lane1_pending) begin
+                            // Phase 0 completed. Save Lane 0's data
+                            if (is_load && (active_rd != 5'd0)) begin
+                                pending_lane0_rdata <= active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0];
+                            end
+                            
                             // Issue Phase 1 for Divergent Access
                             l1_req_valid      <= 1'b1;
                             l1_req_addr       <= active_rs1_lane1;
@@ -221,6 +212,22 @@ module lsu (
                             active_word_sel   <= active_rs1_lane1[2];
                             state             <= STATE_WAIT;
                         end else begin
+                            // Completion of either Uniform request or Phase 1 of Divergent request
+                            if (is_load && (active_rd != 5'd0)) begin
+                                wb.valid   <= 1'b1;
+                                wb.warp_id <= active_warp_id;
+                                wb.rd      <= active_rd;
+                                wb.mask    <= 32'hFFFFFFFF;
+                                if (active_is_uniform) begin
+                                    // Uniform Scalar Broadcast across SIMD lanes
+                                    wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]}
+                                                               : {l1_rsp_rdata[31:0],  l1_rsp_rdata[31:0]};
+                                end else begin
+                                    // Divergent Phase 1 Completion
+                                    wb.data <= { (active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0]), pending_lane0_rdata };
+                                end
+                            end
+
                             ctx_wb.valid   <= 1'b1;
                             ctx_wb.warp_id <= active_warp_id;
                             ctx_wb.next_pc <= active_pc + 12'd1;
