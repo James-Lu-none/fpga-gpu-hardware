@@ -1,4 +1,7 @@
 `timescale 1ns / 1ps
+// GPC L2 Shared Cache & AXI4 Master
+// Services L1 misses from NUM_PORTS SMs and interfaces with DDR3 via AXI4.
+// Capacity: 16KB (512 lines x 32 Bytes) Direct Mapped, Write-Through
 
 import gpu_pkg::*;
 
@@ -142,7 +145,11 @@ module l2_cache #(
                 sm_rsp_valid[current_sm] <= 1'b1;
                 sm_rsp_rdata[current_sm] <= selected_rsp_data;
                 current_sm <= next_port(current_sm);
-            end else if (!selected_valid && NUM_PORTS > 1) begin
+            end else if (!selected_valid && core_bus.req_ready && NUM_PORTS > 1) begin
+                // Once a request is accepted, unified_cache deasserts
+                // core_bus.req_ready while it performs lookup/AXI work.
+                // Keep current_sm fixed during that interval; rotating here
+                // would route the eventual response to a different SM.
                 current_sm <= next_port(current_sm);
             end
         end
