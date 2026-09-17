@@ -69,31 +69,75 @@ module sub_partition (
     // since memory reads have high and variable latency, so LSU is prioritized over ALU to avoid memory response drops, 
     // secondly, prioritizing LSU can unstall the waiting warp as early as possible.
 
-    assign wb.valid   = lsu_wb.valid ? lsu_wb.valid   : alu_wb.valid;
-    assign wb.warp_id = lsu_wb.valid ? lsu_wb.warp_id : alu_wb.warp_id;
-    assign wb.rd      = lsu_wb.valid ? lsu_wb.rd      : alu_wb.rd;
-    assign wb.data    = lsu_wb.valid ? lsu_wb.data    : alu_wb.data;
-    assign wb.mask    = lsu_wb.valid ? lsu_wb.mask    : alu_wb.mask;
+    // -------------------------------------------------------------------------
+    // LSU Write-Back Buffer & Arbitration
+    // -------------------------------------------------------------------------
+    // Both ALU and LSU share the same write-back interface to VRF (wb) and scheduler (ctx_wb).
+    // ALU operations have a fixed pipeline, so they cannot be stalled.
+    // If LSU completes on the exact same cycle as ALU, we must buffer the LSU write-back
+    // and apply it on the next available cycle.
+
+    reg lsu_buf_valid;
     
-    // 2. context/scheduler write-back aribiter (ctx_wb_if -> warp_context):
-    // Retires the instruction in the Warp Scheduler, transitions the warp from STATE_STALL back to STATE_READY, and updates the Program Counter (next_pc).
-    // every instruction (including STR, BR, SYNC, EXIT) MUST send a ctx_wb signal upon completion, otherwise the warp remains stuck in STATE_STALL forever.
-    // 
-    // ctx_lsu_wb.valid is asserted both when LDR and STR 
-    // * For memory stores (STR): STR writes to memory, so it never writes a register (lsu_wb.valid is ALWAYS 0)
-    // so when STR finishes in cache/DDR3, we need perform a write back to notify the scheduler that the store has retired.
-    // hence ctx_lsu_wb.valid is used instead of lsu_wb.valid otherwise the warp to either hang or improperly fall back to ctx_alu_wb
+    // Captured from lsu_wb
+    reg buf_lsu_wb_valid;
+    reg [$clog2(MAX_WARPS)-1:0] buf_lsu_wb_warp_id;
+    reg [4:0] buf_lsu_wb_rd;
+    reg [32*NUM_LANES-1:0] buf_lsu_wb_data;
+    reg [31:0] buf_lsu_wb_mask;
     
-    assign ctx_wb.valid          = ctx_lsu_wb.valid ? ctx_lsu_wb.valid          : ctx_alu_wb.valid;
-    assign ctx_wb.warp_id        = ctx_lsu_wb.valid ? ctx_lsu_wb.warp_id        : ctx_alu_wb.warp_id;
-    assign ctx_wb.next_pc        = ctx_lsu_wb.valid ? ctx_lsu_wb.next_pc        : ctx_alu_wb.next_pc;
-    assign ctx_wb.is_done        = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_done;
-    assign ctx_wb.taken_mask     = ctx_lsu_wb.valid ? 32'd0                     : ctx_alu_wb.taken_mask;
-    assign ctx_wb.not_taken_mask = ctx_lsu_wb.valid ? 32'd0                     : ctx_alu_wb.not_taken_mask;
-    assign ctx_wb.is_divergent   = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_divergent;
-    assign ctx_wb.is_sync        = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_sync;
-    assign ctx_wb.is_ssy         = ctx_lsu_wb.valid ? 1'b0                      : ctx_alu_wb.is_ssy;
-    assign ctx_wb.target_pc      = ctx_lsu_wb.valid ? 12'd0                     : ctx_alu_wb.target_pc;
+    // Captured from ctx_lsu_wb
+    reg buf_ctx_lsu_wb_valid;
+    reg [$clog2(MAX_WARPS)-1:0] buf_ctx_lsu_wb_warp_id;
+    reg [11:0] buf_ctx_lsu_wb_next_pc;
+
+    wire alu_active = alu_wb.valid || ctx_alu_wb.valid;
+    wire flush_buf  = lsu_buf_valid && !alu_active;
+    wire load_buf   = (lsu_wb.valid || ctx_lsu_wb.valid) && alu_active && !lsu_buf_valid;
+
+    always @(posedge clk or negedge core_rst_n) begin
+        if (!core_rst_n) begin
+            lsu_buf_valid <= 1'b0;
+            buf_lsu_wb_valid <= 1'b0;
+            buf_ctx_lsu_wb_valid <= 1'b0;
+        end else begin
+            if (flush_buf) begin
+                lsu_buf_valid <= 1'b0;
+            end else if (load_buf) begin
+                lsu_buf_valid <= 1'b1;
+                
+                buf_lsu_wb_valid <= lsu_wb.valid;
+                buf_lsu_wb_warp_id <= lsu_wb.warp_id;
+                buf_lsu_wb_rd <= lsu_wb.rd;
+                buf_lsu_wb_data <= lsu_wb.data;
+                buf_lsu_wb_mask <= lsu_wb.mask;
+
+                buf_ctx_lsu_wb_valid <= ctx_lsu_wb.valid;
+                buf_ctx_lsu_wb_warp_id <= ctx_lsu_wb.warp_id;
+                buf_ctx_lsu_wb_next_pc <= ctx_lsu_wb.next_pc;
+            end
+        end
+    end
+
+    wire eff_lsu_wb_valid = lsu_buf_valid ? buf_lsu_wb_valid : (lsu_wb.valid && !load_buf);
+    wire eff_ctx_lsu_wb_valid = lsu_buf_valid ? buf_ctx_lsu_wb_valid : (ctx_lsu_wb.valid && !load_buf);
+
+    assign wb.valid   = alu_wb.valid ? alu_wb.valid   : eff_lsu_wb_valid;
+    assign wb.warp_id = alu_wb.valid ? alu_wb.warp_id : (lsu_buf_valid ? buf_lsu_wb_warp_id : lsu_wb.warp_id);
+    assign wb.rd      = alu_wb.valid ? alu_wb.rd      : (lsu_buf_valid ? buf_lsu_wb_rd : lsu_wb.rd);
+    assign wb.data    = alu_wb.valid ? alu_wb.data    : (lsu_buf_valid ? buf_lsu_wb_data : lsu_wb.data);
+    assign wb.mask    = alu_wb.valid ? alu_wb.mask    : (lsu_buf_valid ? buf_lsu_wb_mask : lsu_wb.mask);
+    
+    assign ctx_wb.valid          = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.valid : eff_ctx_lsu_wb_valid;
+    assign ctx_wb.warp_id        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.warp_id : (lsu_buf_valid ? buf_ctx_lsu_wb_warp_id : ctx_lsu_wb.warp_id);
+    assign ctx_wb.next_pc        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.next_pc : (lsu_buf_valid ? buf_ctx_lsu_wb_next_pc : ctx_lsu_wb.next_pc);
+    assign ctx_wb.is_done        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_done : 1'b0;
+    assign ctx_wb.taken_mask     = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.taken_mask : 32'd0;
+    assign ctx_wb.not_taken_mask = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.not_taken_mask : 32'd0;
+    assign ctx_wb.is_divergent   = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_divergent : 1'b0;
+    assign ctx_wb.is_sync        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_sync : 1'b0;
+    assign ctx_wb.is_ssy         = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_ssy : 1'b0;
+    assign ctx_wb.target_pc      = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.target_pc : 12'd0;
 
     // 1. Warp Context & Dynamic Scheduler
     warp_context u_warp_context (
