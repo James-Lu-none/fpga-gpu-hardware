@@ -97,6 +97,12 @@ module sub_partition (
     wire alu_active = alu_wb.valid || ctx_alu_wb.valid;
     wire flush_buf  = lsu_buf_valid && !alu_active;
     wire load_buf   = (lsu_wb.valid || ctx_lsu_wb.valid) && alu_active && !lsu_buf_valid;
+    // When the buffered LSU completion is released, a new LSU completion may
+    // arrive on the same cycle. Replace the consumed entry instead of dropping
+    // the new warp's retirement event. Losing ctx_lsu_wb here leaves that warp
+    // permanently in STATE_STALL in warp_context.
+    wire replace_buf = lsu_buf_valid && !alu_active &&
+                       (lsu_wb.valid || ctx_lsu_wb.valid);
 
     always @(posedge clk or negedge core_rst_n) begin
         if (!core_rst_n) begin
@@ -104,7 +110,19 @@ module sub_partition (
             buf_lsu_wb_valid <= 1'b0;
             buf_ctx_lsu_wb_valid <= 1'b0;
         end else begin
-            if (flush_buf) begin
+            if (replace_buf) begin
+                lsu_buf_valid <= 1'b1;
+
+                buf_lsu_wb_valid <= lsu_wb.valid;
+                buf_lsu_wb_warp_id <= lsu_wb.warp_id;
+                buf_lsu_wb_rd <= lsu_wb.rd;
+                buf_lsu_wb_data <= lsu_wb.data;
+                buf_lsu_wb_mask <= lsu_wb.mask;
+
+                buf_ctx_lsu_wb_valid <= ctx_lsu_wb.valid;
+                buf_ctx_lsu_wb_warp_id <= ctx_lsu_wb.warp_id;
+                buf_ctx_lsu_wb_next_pc <= ctx_lsu_wb.next_pc;
+            end else if (flush_buf) begin
                 lsu_buf_valid <= 1'b0;
             end else if (load_buf) begin
                 lsu_buf_valid <= 1'b1;
