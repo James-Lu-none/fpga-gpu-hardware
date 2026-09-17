@@ -1,7 +1,4 @@
 `timescale 1ns / 1ps
-// GPC L2 Shared Cache & AXI4 Master
-// Services L1 misses from NUM_PORTS SMs and interfaces with DDR3 via AXI4.
-// Capacity: 16KB (512 lines x 32 Bytes) Direct Mapped, Write-Through
 
 import gpu_pkg::*;
 
@@ -11,332 +8,155 @@ module l2_cache #(
     input wire clk,
     input wire rst_n,
     input wire flush,
-
-    // Vectorized L1 Cache Interfaces (From NUM_PORTS SMs)
-    input  wire [NUM_PORTS-1:0] sm_req_valid,
-    input  wire [31:0] sm_req_addr  [0:NUM_PORTS-1],
-    input  wire [255:0] sm_req_wdata [0:NUM_PORTS-1],
-    input  wire [31:0] sm_req_wstrb [0:NUM_PORTS-1],
-    input  wire [NUM_PORTS-1:0] sm_req_we,
+    input wire [NUM_PORTS-1:0] sm_req_valid,
+    input wire [31:0] sm_req_addr [0:NUM_PORTS-1],
+    input wire [255:0] sm_req_wdata [0:NUM_PORTS-1],
+    input wire [31:0] sm_req_wstrb [0:NUM_PORTS-1],
+    input wire [NUM_PORTS-1:0] sm_req_we,
     output wire [NUM_PORTS-1:0] sm_req_ready,
-    output reg  [NUM_PORTS-1:0] sm_rsp_valid,
-    output reg  [255:0] sm_rsp_rdata [0:NUM_PORTS-1],
-
-    // AXI4-Full Master Interface (To DDR3)
-    output reg m_axi_awvalid,
-    output reg [31:0] m_axi_awaddr,
-    output reg [7:0] m_axi_awlen,
-    output reg [2:0] m_axi_awsize,
-    output reg [1:0] m_axi_awburst,
+    output reg [NUM_PORTS-1:0] sm_rsp_valid,
+    output reg [255:0] sm_rsp_rdata [0:NUM_PORTS-1],
+    output wire m_axi_awvalid,
+    output wire [31:0] m_axi_awaddr,
+    output wire [7:0] m_axi_awlen,
+    output wire [2:0] m_axi_awsize,
+    output wire [1:0] m_axi_awburst,
     input wire m_axi_awready,
-
-    output reg m_axi_wvalid,
-    output reg [255:0]m_axi_wdata,
-    output reg [31:0] m_axi_wstrb,
-    output reg m_axi_wlast,
+    output wire m_axi_wvalid,
+    output wire [255:0] m_axi_wdata,
+    output wire [31:0] m_axi_wstrb,
+    output wire m_axi_wlast,
     input wire m_axi_wready,
-
     input wire m_axi_bvalid,
-    output reg m_axi_bready,
-
-    output reg m_axi_arvalid,
-    output reg [31:0] m_axi_araddr,
-    output reg [7:0] m_axi_arlen,
-    output reg [2:0] m_axi_arsize,
-    output reg [1:0] m_axi_arburst,
+    output wire m_axi_bready,
+    output wire m_axi_arvalid,
+    output wire [31:0] m_axi_araddr,
+    output wire [7:0] m_axi_arlen,
+    output wire [2:0] m_axi_arsize,
+    output wire [1:0] m_axi_arburst,
     input wire m_axi_arready,
-
     input wire m_axi_rvalid,
-    input wire [255:0]m_axi_rdata,
+    input wire [255:0] m_axi_rdata,
     input wire m_axi_rlast,
-    output reg m_axi_rready
+    output wire m_axi_rready
 `ifdef ENABLE_GPU_DEBUG
-    ,
-    // Debug Status Output
-    output wire [15:0] debug_l2
+    , output wire [15:0] debug_l2
 `endif
 );
-
-    // Round-Robin Arbiter for L1 Requests
     localparam PORT_SEL_W = (NUM_PORTS > 1) ? $clog2(NUM_PORTS) : 1;
     reg [PORT_SEL_W-1:0] current_sm;
+    wire selected_valid = sm_req_valid[current_sm];
+    wire selected_rsp_valid;
+    wire [255:0] selected_rsp_data;
 
-    wire req_valid = sm_req_valid[current_sm];
-    wire [31:0] req_addr  = sm_req_addr[current_sm];
-    wire [255:0]req_wdata = sm_req_wdata[current_sm];
-    wire [31:0] req_wstrb = sm_req_wstrb[current_sm];
-    wire req_we    = sm_req_we[current_sm];
+    cache_line_if #(.ADDR_W(32), .DATA_W(256)) core_bus();
+    cache_line_if #(.ADDR_W(32), .DATA_W(256)) memory_bus();
+    reg aw_done;
+    reg w_done;
 
-    reg req_ready_internal;
-    for (genvar p = 0; p < NUM_PORTS; p = p + 1) begin : gen_sm_req_ready
-        assign sm_req_ready[p] = (current_sm == p) ? req_ready_internal : 1'b0;
+    assign core_bus.req_valid = selected_valid;
+    assign core_bus.req_addr = sm_req_addr[current_sm];
+    assign core_bus.req_wdata = sm_req_wdata[current_sm];
+    assign core_bus.req_wstrb = sm_req_wstrb[current_sm];
+    assign core_bus.req_we = sm_req_we[current_sm];
+
+    for (genvar p = 0; p < NUM_PORTS; p = p + 1) begin : gen_ready
+        assign sm_req_ready[p] = (current_sm == p) && core_bus.req_ready;
     end
 
-    // Cache Parameters & Storage
-    // 32-bit Address = [31:14] Tag (18 bits) | [13:5] Index (9 bits) | [4:0] Offset (5 bits)
-    // 512 lines * 32 Bytes = 16KB
-    localparam NUM_LINES = 512;
-    wire [17:0] req_tag   = req_addr[31:14];
-    wire [8:0]  req_index = req_addr[13:5];
-    
-    (* ram_style = "block" *) reg [17:0] tag_ram [0:NUM_LINES-1];
-    reg valid_ram [0:NUM_LINES-1];
+    assign selected_rsp_valid = core_bus.rsp_valid;
+    assign selected_rsp_data = core_bus.rsp_rdata;
 
-    reg [17:0] tag_ram_dout;
-    reg valid_ram_dout;
-    
-    reg tag_ram_we;
-    reg [17:0] tag_ram_wdata;
-    
-    reg valid_ram_we;
-    reg valid_ram_wdata;
+    assign memory_bus.req_ready = memory_bus.req_we ?
+                                  (aw_done && w_done) : m_axi_arready;
+    assign memory_bus.rsp_valid = memory_bus.req_we ? m_axi_bvalid :
+                                  (m_axi_rvalid && m_axi_rlast);
+    assign memory_bus.rsp_rdata = m_axi_rdata;
 
-    integer i;
-    initial begin
-        for (i = 0; i < NUM_LINES; i = i + 1) begin
-            valid_ram[i] = 1'b0;
-            tag_ram[i]   = 18'd0;
-        end
-    end
+    assign m_axi_awvalid = memory_bus.req_valid && memory_bus.req_we && !aw_done;
+    assign m_axi_awaddr = memory_bus.req_addr;
+    assign m_axi_awlen = 8'd0;
+    assign m_axi_awsize = 3'b101;
+    assign m_axi_awburst = 2'b01;
+    assign m_axi_wvalid = memory_bus.req_valid && memory_bus.req_we && !w_done;
+    assign m_axi_wdata = memory_bus.req_wdata;
+    assign m_axi_wstrb = memory_bus.req_wstrb;
+    assign m_axi_wlast = 1'b1;
+    assign m_axi_bready = memory_bus.rsp_ready && memory_bus.req_we;
 
-    // Strict BRAM Template for Data RAM (Vivado Inference)
-    (* ram_style = "block" *) reg [255:0] data_ram [0:NUM_LINES-1];
-    reg [255:0] data_ram_dout;
-    reg data_ram_we;
-    reg [255:0] data_ram_wdata;
-    
-    // Latched request for pipeline
-    reg [31:0]  latched_req_addr;
-    reg [255:0] latched_req_wdata;
-    reg [31:0]  latched_req_wstrb;
-    reg         latched_req_we;
-    reg [17:0]  latched_req_tag;
-    reg [8:0]   latched_req_index;
+    assign m_axi_arvalid = memory_bus.req_valid && !memory_bus.req_we;
+    assign m_axi_araddr = memory_bus.req_addr;
+    assign m_axi_arlen = 8'd0;
+    assign m_axi_arsize = 3'b101;
+    assign m_axi_arburst = 2'b01;
+    assign m_axi_rready = memory_bus.rsp_ready && !memory_bus.req_we;
 
-    // FSM States
-    localparam STATE_IDLE       = 3'd0;
-    localparam STATE_COMPARE    = 3'd1;
-    localparam STATE_HIT_RETURN = 3'd2;
-    localparam STATE_AXI_AR     = 3'd3;
-    localparam STATE_AXI_R      = 3'd4;
-    localparam STATE_AXI_AW     = 3'd5;
-    localparam STATE_AXI_W      = 3'd6;
-    localparam STATE_AXI_B      = 3'd7;
-
-    reg [2:0] state;
-
-    wire [8:0] ram_addr = (state == STATE_IDLE) ? req_index : latched_req_index;
-
-    always @(posedge clk) begin
-        if (data_ram_we) begin
-            data_ram[ram_addr] <= data_ram_wdata;
-        end
-        data_ram_dout <= data_ram[ram_addr];
-        
-        if (tag_ram_we) begin
-            tag_ram[ram_addr] <= tag_ram_wdata;
-        end
-        tag_ram_dout <= tag_ram[ram_addr];
-    end
-
-    // Valid RAM (Distributed registers allowing 1-cycle global flush)
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            for (int i = 0; i < NUM_LINES; i = i + 1) begin
-                valid_ram[i] <= 1'b0;
-            end
-            valid_ram_dout <= 1'b0;
-        end else if (flush) begin
-            for (int i = 0; i < NUM_LINES; i = i + 1) begin
-                valid_ram[i] <= 1'b0;
-            end
-            valid_ram_dout <= 1'b0;
+        if (!rst_n || flush) begin
+            aw_done <= 1'b0;
+            w_done <= 1'b0;
         end else begin
-            if (valid_ram_we) begin
-                valid_ram[ram_addr] <= valid_ram_wdata;
+            if (!memory_bus.req_valid || !memory_bus.req_we) begin
+                aw_done <= 1'b0;
+                w_done <= 1'b0;
+            end else begin
+                if (m_axi_awvalid && m_axi_awready)
+                    aw_done <= 1'b1;
+                if (m_axi_wvalid && m_axi_wready)
+                    w_done <= 1'b1;
             end
-            valid_ram_dout <= valid_ram[ram_addr];
         end
     end
 
-    function [PORT_SEL_W-1:0] next_port(input [PORT_SEL_W-1:0] curr);
-        if (NUM_PORTS <= 1) return '0;
-        else if (curr == NUM_PORTS - 1) return '0;
-        else return curr + 1'b1;
+    unified_cache #(
+        .NUM_LINES (512),
+        .INDEX_BITS (9),
+        .TAG_BITS (18)
+    ) u_cache (
+        .clk (clk),
+        .rst_n (rst_n),
+        .flush (flush),
+        .core (core_bus),
+        .memory (memory_bus)
+    );
+
+    function [PORT_SEL_W-1:0] next_port(input [PORT_SEL_W-1:0] port);
+        if (NUM_PORTS <= 1)
+            next_port = '0;
+        else if (port == PORT_SEL_W'(NUM_PORTS - 1))
+            next_port = '0;
+        else
+            next_port = port + 1'b1;
     endfunction
 
-    // Controller FSM
+    integer p;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state <= STATE_IDLE;
-            req_ready_internal <= 1'b1;
             current_sm <= '0;
             sm_rsp_valid <= '0;
-            for (int p = 0; p < NUM_PORTS; p = p + 1) begin
-                sm_rsp_rdata[p] <= 256'd0;
-            end
-            
-            m_axi_awvalid <= 1'b0;
-            m_axi_wvalid <= 1'b0;
-            m_axi_bready <= 1'b0;
-            m_axi_arvalid <= 1'b0;
-            m_axi_rready <= 1'b0;
-            
-            data_ram_we <= 1'b0;
-            valid_ram_we <= 1'b0;
-            tag_ram_we <= 1'b0;
+            for (p = 0; p < NUM_PORTS; p = p + 1)
+                sm_rsp_rdata[p] <= '0;
         end else begin
-            data_ram_we <= 1'b0;
-            valid_ram_we <= 1'b0;
-            tag_ram_we <= 1'b0;
             sm_rsp_valid <= '0;
-
-            case (state)
-                STATE_IDLE: begin
-                    if (req_valid && req_ready_internal) begin
-                        req_ready_internal <= 1'b0;
-                        
-                        // Latch request to break timing path from arbiter (current_sm)
-                        latched_req_addr <= req_addr;
-                        latched_req_wdata <= req_wdata;
-                        latched_req_wstrb <= req_wstrb;
-                        latched_req_we <= req_we;
-                        latched_req_tag <= req_tag;
-                        latched_req_index <= req_index;
-                        
-                        state <= STATE_COMPARE;
-                    end else begin
-                        // Rotate arbiter if current port has no request
-                        if (!req_valid && NUM_PORTS > 1) begin
-                            current_sm <= next_port(current_sm);
-                        end
-                    end
-                end
-
-                STATE_COMPARE: begin
-                    // Check Hit
-                    if (valid_ram_dout && (tag_ram_dout == latched_req_tag)) begin
-                        // L2 HIT
-                        if (latched_req_we) begin
-                            // Write-Through to DDR3
-                            valid_ram_we <= 1'b1;
-                            valid_ram_wdata <= 1'b0; // Invalidate L2 on write
-                            
-                            m_axi_awvalid <= 1'b1;
-                            m_axi_awaddr <= latched_req_addr; // Address is 32-byte aligned from L1
-                            m_axi_awlen <= 8'd0; // 1 beat of 256-bit
-                            m_axi_awsize <= 3'b101; // 2^5 = 32 bytes
-                            m_axi_awburst <= 2'b01; // INCR
-                            state <= STATE_AXI_AW;
-                        end else begin
-                            // Read Hit
-                            state <= STATE_HIT_RETURN;
-                        end
-                    end else begin
-                        // L2 MISS
-                        if (latched_req_we) begin
-                            // Write-Miss: Send directly to DDR3
-                            m_axi_awvalid <= 1'b1;
-                            m_axi_awaddr <= latched_req_addr;
-                            m_axi_awlen <= 8'd0;
-                            m_axi_awsize <= 3'b101;
-                            m_axi_awburst <= 2'b01;
-                            state <= STATE_AXI_AW;
-                        end else begin
-                            // Read-Miss: Fetch from DDR3
-                            m_axi_arvalid <= 1'b1;
-                            m_axi_araddr <= latched_req_addr;
-                            m_axi_arlen <= 8'd0; // 1 beat of 256-bit
-                            m_axi_arsize <= 3'b101; // 32 bytes
-                            m_axi_arburst <= 2'b01; // INCR
-                            state <= STATE_AXI_AR;
-                        end
-                    end
-                end
-
-                STATE_HIT_RETURN: begin
-                    sm_rsp_valid[current_sm] <= 1'b1;
-                    sm_rsp_rdata[current_sm] <= data_ram_dout;
-                    req_ready_internal <= 1'b1;
-                    if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
-                    state <= STATE_IDLE;
-                end
-
-                // --- READ PATH ---
-                STATE_AXI_AR: begin
-                    if (m_axi_arvalid && m_axi_arready) begin
-                        m_axi_arvalid <= 1'b0;
-                        m_axi_rready <= 1'b1;
-                        state <= STATE_AXI_R;
-                    end
-                end
-                STATE_AXI_R: begin
-                    if (m_axi_rvalid && m_axi_rready) begin
-                        m_axi_rready <= 1'b0;
-                        // Refill L2 Cache
-                        valid_ram_we <= 1'b1;
-                        valid_ram_wdata <= 1'b1;
-                        tag_ram_we <= 1'b1;
-                        tag_ram_wdata <= latched_req_tag;
-                        
-                        data_ram_we <= 1'b1;
-                        data_ram_wdata <= m_axi_rdata;
-                        
-                        // Return to L1
-                        sm_rsp_valid[current_sm] <= 1'b1;
-                        sm_rsp_rdata[current_sm] <= m_axi_rdata;
-                        
-                        req_ready_internal <= 1'b1;
-                        if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
-                        state <= STATE_IDLE;
-                    end
-                end
-
-                // --- WRITE PATH ---
-                STATE_AXI_AW: begin
-                    if (m_axi_awvalid && m_axi_awready) begin
-                        m_axi_awvalid <= 1'b0;
-                        m_axi_wvalid <= 1'b1;
-                        m_axi_wdata <= latched_req_wdata;
-                        m_axi_wstrb <= latched_req_wstrb;
-                        m_axi_wlast <= 1'b1;
-                        state <= STATE_AXI_W;
-                    end
-                end
-                STATE_AXI_W: begin
-                    if (m_axi_wvalid && m_axi_wready) begin
-                        m_axi_wvalid <= 1'b0;
-                        m_axi_wlast <= 1'b0;
-                        m_axi_bready <= 1'b1; // Assert BREADY to accept write response
-                        state <= STATE_AXI_B;
-                    end
-                end
-                STATE_AXI_B: begin
-                    if (m_axi_bvalid && m_axi_bready) begin
-                        m_axi_bready <= 1'b0; // Deassert BREADY after handshake
-                        // Write complete
-                        sm_rsp_valid[current_sm] <= 1'b1; // ACK
-                        req_ready_internal <= 1'b1;
-                        if (NUM_PORTS > 1) current_sm <= next_port(current_sm);
-                        state <= STATE_IDLE;
-                    end
-                end
-            endcase
+            if (selected_rsp_valid) begin
+                sm_rsp_valid[current_sm] <= 1'b1;
+                sm_rsp_rdata[current_sm] <= selected_rsp_data;
+                current_sm <= next_port(current_sm);
+            end else if (!selected_valid && NUM_PORTS > 1) begin
+                current_sm <= next_port(current_sm);
+            end
         end
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    // Debug Status Multiplexing
     assign debug_l2 = {
-        m_axi_rready, m_axi_rvalid,       // [15:14]
-        m_axi_arready, m_axi_arvalid,     // [13:12]
-        m_axi_bready, m_axi_bvalid,       // [11:10]
-        m_axi_wready, m_axi_wvalid,       // [9:8]
-        m_axi_awready, m_axi_awvalid,     // [7:6]
-        req_ready_internal, req_valid,    // [5:4]
-        1'b0,                             // [3]
-        state[2:0]                        // [2:0]
+        m_axi_rready, m_axi_rvalid,
+        m_axi_arready, m_axi_arvalid,
+        m_axi_bready, m_axi_bvalid,
+        m_axi_wready, m_axi_wvalid,
+        m_axi_awready, m_axi_awvalid,
+        core_bus.req_ready, selected_valid,
+        1'b0, 3'd0
     };
 `endif
-
 endmodule
