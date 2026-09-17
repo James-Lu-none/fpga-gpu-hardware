@@ -35,7 +35,8 @@ module lsu (
     ctx_wb_if.master ctx_wb
 `ifdef ENABLE_GPU_DEBUG
     , output wire [31:0] debug_lsu,
-      output wire [31:0] debug_lsu_addr
+    output wire [31:0] debug_lsu_addr,
+    output wire [31:0] debug_lsu_state
 `endif
 );
     localparam OP_LDR = 8'hA0;
@@ -235,6 +236,24 @@ module lsu (
         lsu_ready,
         active_is_load,
         state
+    };
+
+    // Extended live snapshot for diagnosing occupancy-boundary deadlocks.
+    // The existing debug_lsu word is kept stable for software compatibility;
+    // this word exposes the queued request ownership and retirement signals.
+    assign debug_lsu_state = {
+        fifo_count[3:0],
+        fifo_rd_ptr[2:0],
+        fifo_wr_ptr[2:0],
+        active_warp_id[2:0],
+        active_pc[11:0],
+        active_lane1_pending,
+        active_is_uniform,
+        active_is_load,
+        l1_rsp_valid,
+        l1_req_valid,
+        l1_req_ready,
+        ctx_wb.valid
     };
 `endif
 endmodule

@@ -28,7 +28,7 @@ sequenceDiagram
         LSU->>LSU: Build lane0 request:<br/>l1_req_addr = fifo_addr<br/>l1_req_wdata = {lane0_data,lane0_data}<br/>l1_req_we = !fifo_is_load<br/>l1_req_wstrb = F0 or 0F
         LSU->>L1: l1_req_valid=1<br/>l1_req_addr<br/>l1_req_wdata<br/>l1_req_we<br/>l1_req_wstrb
         L1-->>LSU: l1_req_ready
-        LSU->>LSU: request_fire = l1_req_valid && l1_req_ready<br/>Clear l1_req_valid&#59; ST_ISSUE to ST_WAIT
+        LSU->>LSU: if (request_fire = l1_req_valid && l1_req_ready)<br/>Clear l1_req_valid<br/> ST_ISSUE to ST_WAIT
         Note over LSU,L1: l1_req_valid must remain asserted until l1_req_ready.<br/>This is the request-side ready/valid handshake.
     end
 

@@ -46,6 +46,7 @@ module streaming_multiprocessor #(
     output wire [31:0] debug_warp_extra,
     output wire [31:0] debug_lsu,
     output wire [31:0] debug_lsu_addr,
+    output wire [31:0] debug_lsu_state,
     output wire [15:0] debug_l1
 `endif
 );
@@ -189,6 +190,7 @@ module streaming_multiprocessor #(
     wire [31:0] sp_debug_warp_extra  [0:NUM_SPS-1];
     wire [31:0] sp_debug_lsu         [0:NUM_SPS-1];
     wire [31:0] sp_debug_lsu_addr    [0:NUM_SPS-1];
+    wire [31:0] sp_debug_lsu_state   [0:NUM_SPS-1];
 `endif
 
     for (genvar m = 0; m < NUM_SPS; m = m + 1) begin : gen_sub_partitions
@@ -219,7 +221,8 @@ module streaming_multiprocessor #(
             .debug_warp_status (sp_debug_warp_status[m]),
             .debug_warp_extra  (sp_debug_warp_extra[m]),
             .debug_lsu         (sp_debug_lsu[m]),
-            .debug_lsu_addr    (sp_debug_lsu_addr[m])
+            .debug_lsu_addr    (sp_debug_lsu_addr[m]),
+            .debug_lsu_state   (sp_debug_lsu_state[m])
 `endif
         );
     end
@@ -229,6 +232,7 @@ module streaming_multiprocessor #(
     assign debug_warp_extra  = sp_debug_warp_extra[0];
     assign debug_lsu         = sp_debug_lsu[0];
     assign debug_lsu_addr    = sp_debug_lsu_addr[0];
+    assign debug_lsu_state   = sp_debug_lsu_state[0];
 
     assign debug_sm = {
         12'd0,

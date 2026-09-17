@@ -52,6 +52,7 @@ module gpc_top #(
     wire [31:0] sm_debug_warp_extra  [0:NUM_SM_INST-1];
     wire [31:0] sm_debug_lsu         [0:NUM_SM_INST-1];
     wire [31:0] sm_debug_lsu_addr    [0:NUM_SM_INST-1];
+    wire [31:0] sm_debug_lsu_state   [0:NUM_SM_INST-1];
     wire [15:0] sm_debug_l1          [0:NUM_SM_INST-1];
     wire [15:0] debug_l2;
 `endif
@@ -80,6 +81,7 @@ module gpc_top #(
         .debug_warp_extra  (sm_debug_warp_extra[0]),
         .debug_lsu         (sm_debug_lsu[0]),
         .debug_lsu_addr    (sm_debug_lsu_addr[0]),
+        .debug_lsu_state   (sm_debug_lsu_state[0]),
         .debug_l1_l2       ({sm_debug_l1[0], debug_l2})
 `endif
     );
@@ -161,6 +163,7 @@ module gpc_top #(
             .debug_warp_extra     (sm_debug_warp_extra[n]),
             .debug_lsu            (sm_debug_lsu[n]),
             .debug_lsu_addr       (sm_debug_lsu_addr[n]),
+            .debug_lsu_state      (sm_debug_lsu_state[n]),
             .debug_l1             (sm_debug_l1[n])
 `endif
         );
