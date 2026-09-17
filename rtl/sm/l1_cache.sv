@@ -15,6 +15,7 @@ module l1_cache (
     input wire [31:0] req_addr,
     input wire [DATA_W-1:0] req_wdata,
     input wire req_we,
+    input wire [7:0] req_wstrb,
     output reg req_ready, // Ready to accept new request
     
     output reg rsp_valid,
@@ -70,6 +71,7 @@ module l1_cache (
     reg [31:0] req_addr_q;
     reg [DATA_W-1:0] req_wdata_q;
     reg req_we_q;
+    reg [7:0] req_wstrb_q;
     wire [20:0] req_tag_q = req_addr_q[31:11];
     wire [5:0] req_index_q = req_addr_q[10:5];
     wire [4:0] req_offset_q = req_addr_q[4:0];
@@ -118,6 +120,7 @@ module l1_cache (
                         req_addr_q <= req_addr;
                         req_wdata_q <= req_wdata;
                         req_we_q <= req_we;
+                        req_wstrb_q <= req_wstrb;
                         state <= STATE_COMPARE;
                     end
                 end
@@ -135,7 +138,7 @@ module l1_cache (
                             // Shift wdata to correct position
                             // req_offset[4:3] selects which 64-bit chunk (0 to 3)
                             l2_req_wdata <= {192'd0, req_wdata_q} << (req_offset_q[4:3] * 64);
-                            l2_req_wstrb <= 32'h00_00_00_FF << req_offset_q;
+                            l2_req_wstrb <= {28'd0, req_wstrb_q} << (req_offset_q[4:3] * 8);
                             
                             // Also update local L1 Cache Data
                             // In Verilog, we can just do a partial update if we model byte-enables,
@@ -166,7 +169,7 @@ module l1_cache (
                             l2_req_addr <= {req_addr_q[31:5], 5'd0};
                             l2_req_we <= 1'b1;
                             l2_req_wdata <= {192'd0, req_wdata_q} << (req_offset_q[4:3] * 64);
-                            l2_req_wstrb <= 32'h00_00_00_FF << req_offset_q;
+                            l2_req_wstrb <= {28'd0, req_wstrb_q} << (req_offset_q[4:3] * 8);
                             state <= STATE_WR_THRU;
                         end else begin
                             // Read-Miss: Fetch from L2
