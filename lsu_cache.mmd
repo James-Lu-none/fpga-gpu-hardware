@@ -1,0 +1,116 @@
+sequenceDiagram
+    autonumber
+
+    participant OP as Operand/VRF<br/>op.valid
+    participant LSU as LSU<br/>FIFO + active FSM
+    participant L1 as L1 adapter<br/>l1_cache
+    participant UC1 as unified_cache<br/>L1 instance
+    participant L2 as L2 arbiter<br/>l2_cache
+    participant UC2 as unified_cache<br/>L2 instance
+    participant AXI as DDR3 AXI<br/>MIG/Crossbar
+    participant CTX as warp_context<br/>ctx_wb
+
+    Note over LSU,CTX: Overview: one request context is retired only after the complete L1/L2/AXI transaction returns.<br/>The LSU FIFO allows different warps to queue while the active engine waits for memory.
+
+    rect rgb(235, 245, 255)
+        Note over OP,LSU: 1. Operand acceptance and FIFO enqueue
+        OP->>LSU: op.valid=1<br/>op.opcode=LDR/STR<br/>warp_id, pc, rd<br/>rs1_data[lane0,lane1]<br/>rs2_data[lane0,lane1]
+        LSU->>LSU: op_is_mem = op.valid && LDR/STR
+        LSU->>LSU: fifo_push = op_is_mem && fifo_count < MAX_WARPS
+        LSU->>LSU: Save complete context:<br/>fifo_warp_id, fifo_pc, fifo_rd<br/>fifo_addr, fifo_lane1_addr<br/>fifo_wdata, load/store, word offsets
+        LSU-->>OP: lsu_ready = fifo_count < FIFO_DEPTH
+        Note over LSU: Modification: the old direct active request path was replaced by a FIFO.<br/>The operand bus may change on the next cycle, so the complete memory context is copied into FIFO.
+    end
+
+    rect rgb(245, 255, 235)
+        Note over LSU,L1: 2. FIFO dequeue and L1 request issue
+        LSU->>LSU: When state=ST_IDLE and fifo_count!=0:<br/>fifo_pop, latch FIFO entry as active request
+        LSU->>LSU: Build lane0 request:<br/>l1_req_addr = fifo_addr<br/>l1_req_wdata = {lane0_data,lane0_data}<br/>l1_req_we = !fifo_is_load<br/>l1_req_wstrb = F0 or 0F
+        LSU->>L1: l1_req_valid=1<br/>l1_req_addr<br/>l1_req_wdata<br/>l1_req_we<br/>l1_req_wstrb
+        L1-->>LSU: l1_req_ready
+        LSU->>LSU: request_fire = l1_req_valid && l1_req_ready<br/>Clear l1_req_valid&#59; ST_ISSUE to ST_WAIT
+        Note over LSU,L1: l1_req_valid must remain asserted until l1_req_ready.<br/>This is the request-side ready/valid handshake.
+    end
+
+    alt L1 cache read hit
+        L1->>UC1: core.req_valid/req_addr/req_we=0
+        UC1->>UC1: ST_IDLE accepts request<br/>core.req_ready=1<br/>Synchronous RAM lookup
+        UC1->>UC1: ST_LOOKUP: valid/tag match
+        UC1-->>L1: core.rsp_valid=1<br/>core.rsp_rdata=cache line
+        L1-->>LSU: l1_rsp_valid=1<br/>l1_rsp_rdata=256-bit line
+    else L1 read miss
+        L1->>UC1: core.req_valid=1<br/>aligned line address from req_addr
+        UC1->>UC1: ST_LOOKUP: miss
+        UC1->>L1: memory.req_valid=1<br/>memory.req_addr=line address<br/>memory.req_we=0
+        L1->>L2: l2_req_valid=1<br/>l2_req_addr=32-byte aligned<br/>l2_req_we=0
+        L2-->>L1: l2_req_ready=1
+        L2->>UC2: core request accepted<br/>owner=current_sm is locked
+        UC2->>UC2: L2 lookup: hit or miss
+
+        alt L2 cache hit
+            UC2-->>L2: core.rsp_valid=1<br/>core.rsp_rdata=cache line
+            L2-->>L1: sm_rsp_valid[current_sm]=1<br/>sm_rsp_rdata[current_sm]
+        else L2 read miss: AXI AR/R
+            UC2->>L2: memory.req_valid=1<br/>memory.req_addr=line address<br/>memory.req_we=0
+            L2->>AXI: m_axi_arvalid=1<br/>m_axi_araddr<br/>m_axi_arlen=0<br/>m_axi_arsize=5<br/>m_axi_arburst=INCR
+            AXI-->>L2: m_axi_arready=1
+            L2->>AXI: m_axi_rready=1
+            AXI-->>L2: m_axi_rvalid=1<br/>m_axi_rlast=1<br/>m_axi_rdata=256-bit line
+            L2->>UC2: memory.rsp_valid + rsp_rdata
+            UC2->>UC2: Refill data_ram/tag_ram<br/>valid_ram[index]=1
+            UC2-->>L2: core.rsp_valid=1<br/>core.rsp_rdata
+            L2-->>L1: sm_rsp_valid[current_sm]=1<br/>sm_rsp_rdata[current_sm]
+        end
+
+        Note over L2: Modification: current_sm is not rotated while core_bus.req_ready=0.<br/>This owner lock prevents the response from being routed to another SM.
+        L1->>L1: Capture l2_rsp_valid into l2_rsp_pending<br/>Save l2_rsp_data_q
+        L1->>UC1: Hold response until l2_bus.rsp_ready
+        UC1->>UC1: Refill L1 data/tag RAM<br/>valid_ram[index]=1
+        UC1-->>L1: core.rsp_valid=1<br/>core.rsp_rdata
+        L1-->>LSU: l1_rsp_valid=1<br/>l1_rsp_rdata
+    end
+
+    rect rgb(255, 248, 230)
+    Note over LSU,CTX: 3. LSU response and retirement
+    LSU->>LSU: response_fire = l1_rsp_valid
+    alt Divergent access: lane1 pending
+        LSU->>LSU: Save lane0_rdata according to active_word_sel
+        LSU->>LSU: active_lane1_pending=0<br/>Prepare lane1 address/data/strobe
+        LSU->>L1: l1_req_valid=1<br/>lane1 l1_req_addr<br/>lane1 l1_req_wstrb
+        L1-->>LSU: l1_req_ready
+        LSU->>LSU: ST_ISSUE to ST_WAIT
+        L1-->>LSU: second l1_rsp_valid + l1_rsp_rdata
+        LSU->>LSU: Combine lane1 result with saved lane0_rdata
+    else Uniform access or second lane complete
+            opt LDR and rd != 0
+                LSU-->>CTX: wb.valid=1<br/>wb.warp_id, wb.rd<br/>wb.data, wb.mask
+            end
+        LSU-->>CTX: ctx_wb.valid=1<br/>ctx_wb.warp_id<br/>ctx_wb.next_pc=active_pc+1
+        CTX->>CTX: Set warp READY and advance PC<br/>or mark DONE for exit elsewhere
+        LSU->>LSU: state <= ST_IDLE<br/>Next FIFO entry may be popped
+    end
+    Note over LSU,CTX: Store instructions do not write wb data, but still emit ctx_wb only after the cache/AXI response.<br/>This prevents the kernel from finishing before DDR write completion.
+    end
+
+    rect rgb(255, 235, 235)
+    Note over L2,AXI: Store path: write-through completion
+    LSU->>L1: l1_req_we=1<br/>l1_req_wstrb selects 4-byte word
+    L1->>UC1: Write request&#59; invalidate local line
+    UC1->>L2: memory.req_valid=1<br/>memory.req_we=1<br/>line data + 32-byte strobe
+    L2->>AXI: m_axi_awvalid=1<br/>m_axi_awaddr<br/>m_axi_awsize=5<br/>m_axi_awlen=0
+    AXI-->>L2: m_axi_awready
+    L2->>AXI: m_axi_wvalid=1<br/>m_axi_wdata<br/>m_axi_wstrb<br/>m_axi_wlast=1
+    AXI-->>L2: m_axi_wready
+    L2->>AXI: m_axi_bready=1
+    AXI-->>L2: m_axi_bvalid=1
+    L2-->>L1: sm_rsp_valid owner port<br/>write completion acknowledgement
+    L1->>L1: Hold pulse in l2_rsp_pending<br/>until unified_cache consumes it
+    L1-->>LSU: l1_rsp_valid=1<br/>store completion
+    LSU-->>CTX: ctx_wb.valid=1<br/>advance warp only now
+    Note over L2,AXI: AW and W are independent AXI channels.<br/>aw_done and w_done prevent duplicate address/data handshakes.
+    end
+
+    Note over OP,CTX: Signal summary
+    Note over LSU: Request: l1_req_valid / l1_req_ready<br/>Response: l1_rsp_valid / l1_rsp_rdata<br/>Retirement: wb.* and ctx_wb.*
+    Note over L1,UC1: Internal line interface:<br/>req_valid, req_ready, req_addr, req_wdata, req_wstrb, req_we<br/>rsp_valid, rsp_ready, rsp_rdata
+    Note over L2,AXI: AXI read: ARVALID/ARREADY then RVALID/RREADY/RLAST<br/>AXI write: AWVALID/AWREADY, WVALID/WREADY, BVALID/BREADY
