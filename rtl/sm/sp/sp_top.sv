@@ -80,78 +80,77 @@ module sub_partition (
     // If LSU completes on the exact same cycle as ALU, we must buffer the LSU write-back
     // and apply it on the next available cycle.
 
-    reg lsu_buf_valid;
-    
-    // Captured from lsu_wb
-    reg buf_lsu_wb_valid;
-    reg [$clog2(MAX_WARPS)-1:0] buf_lsu_wb_warp_id;
-    reg [4:0] buf_lsu_wb_rd;
-    reg [32*NUM_LANES-1:0] buf_lsu_wb_data;
-    reg [31:0] buf_lsu_wb_mask;
-    
-    // Captured from ctx_lsu_wb
-    reg buf_ctx_lsu_wb_valid;
-    reg [$clog2(MAX_WARPS)-1:0] buf_ctx_lsu_wb_warp_id;
-    reg [11:0] buf_ctx_lsu_wb_next_pc;
+    // LSU completions must be queued independently of ALU write-back. A
+    // single skid entry is insufficient: while it is full, another LSU
+    // response can arrive in the same cycle as an ALU result. Dropping that
+    // ctx_wb pulse leaves the corresponding warp permanently in STALL.
+    localparam LSU_WB_QUEUE_DEPTH = MAX_WARPS;
+    localparam LSU_WB_PTR_W = (LSU_WB_QUEUE_DEPTH > 1) ? $clog2(LSU_WB_QUEUE_DEPTH) : 1;
+    localparam LSU_WB_COUNT_W = $clog2(LSU_WB_QUEUE_DEPTH + 1);
+
+    reg [LSU_WB_PTR_W-1:0] lsu_wb_wr_ptr;
+    reg [LSU_WB_PTR_W-1:0] lsu_wb_rd_ptr;
+    reg [LSU_WB_COUNT_W-1:0] lsu_wb_count;
+    reg lsu_wb_valid_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [$clog2(MAX_WARPS)-1:0] lsu_wb_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [4:0] lsu_wb_rd_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [32*NUM_LANES-1:0] lsu_wb_data_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [31:0] lsu_wb_mask_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg lsu_ctx_valid_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [$clog2(MAX_WARPS)-1:0] lsu_ctx_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [11:0] lsu_ctx_next_pc_q [0:LSU_WB_QUEUE_DEPTH-1];
 
     wire alu_active = alu_wb.valid || ctx_alu_wb.valid;
-    wire flush_buf  = lsu_buf_valid && !alu_active;
-    wire load_buf   = (lsu_wb.valid || ctx_lsu_wb.valid) && alu_active && !lsu_buf_valid;
-    // When the buffered LSU completion is released, a new LSU completion may
-    // arrive on the same cycle. Replace the consumed entry instead of dropping
-    // the new warp's retirement event. Losing ctx_lsu_wb here leaves that warp
-    // permanently in STATE_STALL in warp_context.
-    wire replace_buf = lsu_buf_valid && !alu_active &&
-                       (lsu_wb.valid || ctx_lsu_wb.valid);
+    wire lsu_completion_in = lsu_wb.valid || ctx_lsu_wb.valid;
+    wire lsu_queue_full = (lsu_wb_count == LSU_WB_QUEUE_DEPTH);
+    wire lsu_queue_empty = (lsu_wb_count == 0);
+    wire lsu_queue_pop = !lsu_queue_empty && !alu_active;
+    wire lsu_queue_push = lsu_completion_in && !lsu_queue_full;
 
     always @(posedge clk or negedge core_rst_n) begin
         if (!core_rst_n) begin
-            lsu_buf_valid <= 1'b0;
-            buf_lsu_wb_valid <= 1'b0;
-            buf_ctx_lsu_wb_valid <= 1'b0;
-        end else begin
-            if (replace_buf) begin
-                lsu_buf_valid <= 1'b1;
-
-                buf_lsu_wb_valid <= lsu_wb.valid;
-                buf_lsu_wb_warp_id <= lsu_wb.warp_id;
-                buf_lsu_wb_rd <= lsu_wb.rd;
-                buf_lsu_wb_data <= lsu_wb.data;
-                buf_lsu_wb_mask <= lsu_wb.mask;
-
-                buf_ctx_lsu_wb_valid <= ctx_lsu_wb.valid;
-                buf_ctx_lsu_wb_warp_id <= ctx_lsu_wb.warp_id;
-                buf_ctx_lsu_wb_next_pc <= ctx_lsu_wb.next_pc;
-            end else if (flush_buf) begin
-                lsu_buf_valid <= 1'b0;
-            end else if (load_buf) begin
-                lsu_buf_valid <= 1'b1;
-                
-                buf_lsu_wb_valid <= lsu_wb.valid;
-                buf_lsu_wb_warp_id <= lsu_wb.warp_id;
-                buf_lsu_wb_rd <= lsu_wb.rd;
-                buf_lsu_wb_data <= lsu_wb.data;
-                buf_lsu_wb_mask <= lsu_wb.mask;
-
-                buf_ctx_lsu_wb_valid <= ctx_lsu_wb.valid;
-                buf_ctx_lsu_wb_warp_id <= ctx_lsu_wb.warp_id;
-                buf_ctx_lsu_wb_next_pc <= ctx_lsu_wb.next_pc;
+            lsu_wb_wr_ptr <= '0;
+            lsu_wb_rd_ptr <= '0;
+            lsu_wb_count <= '0;
+            for (int q = 0; q < LSU_WB_QUEUE_DEPTH; q = q + 1) begin
+                lsu_wb_valid_q[q] <= 1'b0;
+                lsu_ctx_valid_q[q] <= 1'b0;
             end
+        end else begin
+            if (lsu_queue_push) begin
+                lsu_wb_valid_q[lsu_wb_wr_ptr] <= lsu_wb.valid;
+                lsu_wb_warp_id_q[lsu_wb_wr_ptr] <= lsu_wb.warp_id;
+                lsu_wb_rd_q[lsu_wb_wr_ptr] <= lsu_wb.rd;
+                lsu_wb_data_q[lsu_wb_wr_ptr] <= lsu_wb.data;
+                lsu_wb_mask_q[lsu_wb_wr_ptr] <= lsu_wb.mask;
+                lsu_ctx_valid_q[lsu_wb_wr_ptr] <= ctx_lsu_wb.valid;
+                lsu_ctx_warp_id_q[lsu_wb_wr_ptr] <= ctx_lsu_wb.warp_id;
+                lsu_ctx_next_pc_q[lsu_wb_wr_ptr] <= ctx_lsu_wb.next_pc;
+                lsu_wb_wr_ptr <= lsu_wb_wr_ptr + 1'b1;
+            end
+            if (lsu_queue_pop)
+                lsu_wb_rd_ptr <= lsu_wb_rd_ptr + 1'b1;
+
+            case ({lsu_queue_push, lsu_queue_pop})
+                2'b10: lsu_wb_count <= lsu_wb_count + 1'b1;
+                2'b01: lsu_wb_count <= lsu_wb_count - 1'b1;
+                default: lsu_wb_count <= lsu_wb_count;
+            endcase
         end
     end
 
-    wire eff_lsu_wb_valid = lsu_buf_valid ? buf_lsu_wb_valid : (lsu_wb.valid && !load_buf);
-    wire eff_ctx_lsu_wb_valid = lsu_buf_valid ? buf_ctx_lsu_wb_valid : (ctx_lsu_wb.valid && !load_buf);
+    wire eff_lsu_wb_valid = !lsu_queue_empty && lsu_wb_valid_q[lsu_wb_rd_ptr];
+    wire eff_ctx_lsu_wb_valid = !lsu_queue_empty && lsu_ctx_valid_q[lsu_wb_rd_ptr];
 
-    assign wb.valid   = alu_wb.valid ? alu_wb.valid   : eff_lsu_wb_valid;
-    assign wb.warp_id = alu_wb.valid ? alu_wb.warp_id : (lsu_buf_valid ? buf_lsu_wb_warp_id : lsu_wb.warp_id);
-    assign wb.rd      = alu_wb.valid ? alu_wb.rd      : (lsu_buf_valid ? buf_lsu_wb_rd : lsu_wb.rd);
-    assign wb.data    = alu_wb.valid ? alu_wb.data    : (lsu_buf_valid ? buf_lsu_wb_data : lsu_wb.data);
-    assign wb.mask    = alu_wb.valid ? alu_wb.mask    : (lsu_buf_valid ? buf_lsu_wb_mask : lsu_wb.mask);
+    assign wb.valid   = alu_wb.valid ? alu_wb.valid : eff_lsu_wb_valid;
+    assign wb.warp_id = alu_wb.valid ? alu_wb.warp_id : lsu_wb_warp_id_q[lsu_wb_rd_ptr];
+    assign wb.rd      = alu_wb.valid ? alu_wb.rd : lsu_wb_rd_q[lsu_wb_rd_ptr];
+    assign wb.data    = alu_wb.valid ? alu_wb.data : lsu_wb_data_q[lsu_wb_rd_ptr];
+    assign wb.mask    = alu_wb.valid ? alu_wb.mask : lsu_wb_mask_q[lsu_wb_rd_ptr];
     
     assign ctx_wb.valid          = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.valid : eff_ctx_lsu_wb_valid;
-    assign ctx_wb.warp_id        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.warp_id : (lsu_buf_valid ? buf_ctx_lsu_wb_warp_id : ctx_lsu_wb.warp_id);
-    assign ctx_wb.next_pc        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.next_pc : (lsu_buf_valid ? buf_ctx_lsu_wb_next_pc : ctx_lsu_wb.next_pc);
+    assign ctx_wb.warp_id        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.warp_id : lsu_ctx_warp_id_q[lsu_wb_rd_ptr];
+    assign ctx_wb.next_pc        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.next_pc : lsu_ctx_next_pc_q[lsu_wb_rd_ptr];
     assign ctx_wb.is_done        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_done : 1'b0;
     assign ctx_wb.taken_mask     = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.taken_mask : 32'd0;
     assign ctx_wb.not_taken_mask = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.not_taken_mask : 32'd0;
