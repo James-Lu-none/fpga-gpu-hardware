@@ -31,6 +31,7 @@ module sub_partition (
     // Debug Status Outputs
     output wire [31:0] debug_warp_status,
     output wire [31:0] debug_warp_extra,
+    output wire [31:0] debug_warp_states,
     output wire [31:0] debug_lsu,
     output wire [31:0] debug_lsu_addr,
     output wire [31:0] debug_lsu_state
@@ -158,7 +159,8 @@ module sub_partition (
 `ifdef ENABLE_GPU_DEBUG
         ,
         .debug_warp_status (debug_warp_status),
-        .debug_warp_extra (debug_warp_extra)
+        .debug_warp_extra (debug_warp_extra),
+        .debug_warp_states (debug_warp_states)
 `endif
     );
 

@@ -44,6 +44,7 @@ module streaming_multiprocessor #(
     output wire [31:0] debug_sm,
     output wire [31:0] debug_warp_status,
     output wire [31:0] debug_warp_extra,
+    output wire [31:0] debug_warp_states,
     output wire [31:0] debug_lsu,
     output wire [31:0] debug_lsu_addr,
     output wire [31:0] debug_lsu_state,
@@ -188,6 +189,7 @@ module streaming_multiprocessor #(
 `ifdef ENABLE_GPU_DEBUG
     wire [31:0] sp_debug_warp_status [0:NUM_SPS-1];
     wire [31:0] sp_debug_warp_extra  [0:NUM_SPS-1];
+        wire [31:0] sp_debug_warp_states [0:NUM_SPS-1];
     wire [31:0] sp_debug_lsu         [0:NUM_SPS-1];
     wire [31:0] sp_debug_lsu_addr    [0:NUM_SPS-1];
     wire [31:0] sp_debug_lsu_state   [0:NUM_SPS-1];
@@ -220,6 +222,7 @@ module streaming_multiprocessor #(
             // Debug Status Outputs
             .debug_warp_status (sp_debug_warp_status[m]),
             .debug_warp_extra  (sp_debug_warp_extra[m]),
+                        .debug_warp_states (sp_debug_warp_states[m]),
             .debug_lsu         (sp_debug_lsu[m]),
             .debug_lsu_addr    (sp_debug_lsu_addr[m]),
             .debug_lsu_state   (sp_debug_lsu_state[m])
@@ -230,6 +233,7 @@ module streaming_multiprocessor #(
 `ifdef ENABLE_GPU_DEBUG
     assign debug_warp_status = sp_debug_warp_status[0];
     assign debug_warp_extra  = sp_debug_warp_extra[0];
+        assign debug_warp_states = sp_debug_warp_states[0];
     assign debug_lsu         = sp_debug_lsu[0];
     assign debug_lsu_addr    = sp_debug_lsu_addr[0];
     assign debug_lsu_state   = sp_debug_lsu_state[0];

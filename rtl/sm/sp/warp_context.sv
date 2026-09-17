@@ -26,7 +26,8 @@ module warp_context (
     ,
     // Debug Status Outputs
     output wire [31:0] debug_warp_status,
-    output wire [31:0] debug_warp_extra
+    output wire [31:0] debug_warp_extra,
+    output wire [31:0] debug_warp_states
 `endif
 );
 
@@ -202,6 +203,13 @@ module warp_context (
         warp_state[2][1:0],          // [3:2]: Warp 2 state
         warp_state[3][1:0]           // [1:0]: Warp 3 state
     };
+
+    // Complete resident-warp state snapshot: warp N occupies bits [2*N +: 2].
+    // 0=FREE, 1=READY, 2=STALL, 3=DONE.
+    for (genvar d = 0; d < MAX_WARPS; d = d + 1) begin : gen_warp_state_debug
+        assign debug_warp_states[d*2 +: 2] = warp_state[d];
+    end
+    assign debug_warp_states[31:16] = 16'd0;
 `endif
 
 endmodule

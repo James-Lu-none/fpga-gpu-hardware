@@ -35,6 +35,7 @@ module gpc_control_register (
     input wire [31:0] debug_warp_status,
     input wire [31:0] debug_warp_extra,
     input wire [31:0] debug_lsu,
+        input wire [31:0] debug_warp_states,
     input wire [31:0] debug_lsu_addr,
     input wire [31:0] debug_lsu_state,
     input wire [31:0] debug_l1_l2
@@ -209,6 +210,7 @@ module gpc_control_register (
                         8'h34:   axi_rdata <= debug_sm;
                         8'h38:   axi_rdata <= debug_warp_status;
                         8'h3C:   axi_rdata <= debug_warp_extra;
+                            8'h50:   axi_rdata <= debug_warp_states;
                         8'h40:   axi_rdata <= debug_lsu;
                         8'h44:   axi_rdata <= debug_lsu_addr;
                         8'h48:   axi_rdata <= debug_l1_l2;
