@@ -92,6 +92,37 @@ sequenceDiagram
     Note over LSU,CTX: Store instructions do not write wb data, but still emit ctx_wb only after the cache/AXI response.<br/>This prevents the kernel from finishing before DDR write completion.
     end
 
+    rect rgb(255, 225, 225)
+    Note over LSU,CTX: Why the old architecture failed
+        Note over L2: Old L2 arbiter rotated current_sm as soon as the selected request valid dropped.<br/>The cache transaction was still in flight, so the response could be routed to a different SM and the original LSU waited forever.
+        Note over L1,UC1: Old L1 exposed L2 completion as a one-cycle pulse without a response holding register.<br/>If unified_cache was not in ST_WAIT_MEM on that edge, the refill/store completion was lost.
+        Note over LSU,CTX: Old LSU used a single active context plus a single completion skid entry.<br/>An LSU completion colliding with ALU write-back, or arriving while the skid entry was occupied, could lose ctx_wb and leave a warp in STATE_STALL.
+        Note over CTX: The old live debug words did not expose all warp states or FIFO ownership.<br/>The kernel appeared to hang in TBS WAIT_DONE, but the missing retirement event was not visible until MMIO snapshots were added.
+    end
+
+    rect rgb(245, 240, 255)
+    Note over LSU,CTX: 4. LSU completion queue and retirement arbitration
+        LSU->>LSU: lsu_wb.valid / ctx_lsu_wb.valid
+        LSU->>LSU: Push completion into 8-entry LSU WB queue<br/>when the queue is not full
+        LSU->>LSU: Save warp_id, rd, data, mask,<br/>ctx_wb warp_id and next_pc
+        alt ALU write-back active
+            LSU->>LSU: Hold the oldest LSU completion<br/>until alu_wb and ctx_alu_wb are idle
+            LSU->>CTX: ALU completion has priority this cycle
+        else ALU write-back idle
+            LSU->>CTX: Emit oldest queued wb and ctx_wb
+            LSU->>LSU: Pop completion queue entry
+        end
+        Note over LSU,CTX: The queue prevents an LSU completion from being lost when another LSU response arrives while an ALU result is being committed.<br/>A lost ctx_wb leaves the affected warp permanently in STATE_STALL and keeps TBS in STATE_WAIT_DONE.
+    end
+
+    rect rgb(235, 250, 250)
+    Note over CTX: 5. Warp state and live debug snapshot
+        CTX->>CTX: warp_state[warp_id] <= READY/DONE on ctx_wb
+        CTX->>CTX: A warp is issued once, then enters STALL<br/>until its matching ctx_wb arrives
+        CTX-->>CTX: debug_warp_states[2*N +: 2]<br/>0=FREE, 1=READY, 2=STALL, 3=DONE
+        Note over CTX: MMIO 0x50 exposes all eight resident warp states.<br/>MMIO 0x4C exposes LSU FIFO count/pointers, active warp/PC, lane phase, L1 handshake, and ctx_wb.valid.
+    end
+
     rect rgb(255, 235, 235)
     Note over L2,AXI: Store path: write-through completion
     LSU->>L1: l1_req_we=1<br/>l1_req_wstrb selects 4-byte word
@@ -114,3 +145,4 @@ sequenceDiagram
     Note over LSU: Request: l1_req_valid / l1_req_ready<br/>Response: l1_rsp_valid / l1_rsp_rdata<br/>Retirement: wb.* and ctx_wb.*
     Note over L1,UC1: Internal line interface:<br/>req_valid, req_ready, req_addr, req_wdata, req_wstrb, req_we<br/>rsp_valid, rsp_ready, rsp_rdata
     Note over L2,AXI: AXI read: ARVALID/ARREADY then RVALID/RREADY/RLAST<br/>AXI write: AWVALID/AWREADY, WVALID/WREADY, BVALID/BREADY
+    Note over OP,CTX: Verification status: buffer copy, 64-element vector add, and 4x4 matrix multiplication all pass on hardware.<br/>The LSU completion queue is required for the occupancy-boundary matrix workload.
