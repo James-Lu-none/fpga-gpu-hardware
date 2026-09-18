@@ -193,7 +193,6 @@ module top (
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
         .msi_enable (msi_enable),
-        .irq_pending_debug (irq_pending_debug),
         .msi_vector_width(),
 
         // BAR0 AXI4-Lite Control Bus (Mailbox 0x3F00)
@@ -651,6 +650,7 @@ module top (
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
         .msi_enable (msi_enable),
+        .irq_pending_debug (irq_pending_debug),
         .uart_rxd (uart_rxd),
         .uart_txd (uart_txd),
         .rv_reset_n  (rv_reset_n),
