@@ -17,7 +17,11 @@ module rv_control_register (
 
     // Control Outputs
     output reg        irq_out,
-    output reg        cpu_soft_rst_n_out
+    output reg        cpu_soft_rst_n_out,
+
+    // One-cycle completion event from firmware. gpu_top holds the resulting
+    // XDMA user IRQ request until the XDMA block acknowledges it.
+    output reg        host_irq_notify
 );
 
     // AXI4-Lite Registered Outputs
@@ -61,7 +65,9 @@ module rv_control_register (
 
             irq_out            <= 1'b0;
             cpu_soft_rst_n_out <= 1'b0;
+            host_irq_notify    <= 1'b0;
         end else begin
+            host_irq_notify <= 1'b0;
             // 1. Latch Write Address
             if (!aw_done) begin
                 if (s_axi_lite.awvalid && !axi_awready) begin
@@ -95,6 +101,7 @@ module rv_control_register (
                 case (latched_awaddr[5:0])
                     6'h00: irq_out            <= latched_wdata[0];
                     6'h04: cpu_soft_rst_n_out <= latched_wdata[0];
+                    6'h08: host_irq_notify    <= latched_wdata[0];
                     default: ;
                 endcase
             end

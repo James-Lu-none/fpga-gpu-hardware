@@ -26,7 +26,11 @@ module gpc_control_register (
     output reg [31:0] iram_wdata,
 
     // Status input from Thread Block Scheduler
-    input wire        grid_done_status
+    input wire        grid_done_status,
+
+    // Level interrupt for PicoRV32. It remains asserted until INT_ACK (0x08)
+    // clears the completion status.
+    output wire       completion_irq
 `ifdef ENABLE_GPU_DEBUG
     ,
     // Debug Status Inputs
@@ -70,6 +74,8 @@ module gpc_control_register (
     reg [3:0]  latched_wstrb;
 
     reg        grid_done_reg;
+
+    assign completion_irq = grid_done_reg;
 
     wire write_addr_ready = s_axi_lite.awvalid && (!aw_done || axi_awready);
     wire write_data_ready = s_axi_lite.wvalid && (!w_done || axi_wready);

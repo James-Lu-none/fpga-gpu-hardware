@@ -58,13 +58,17 @@ module gpu_top (
     
     // Host Control Registers (Sniffed from AXI Lite Write Channel)
     wire irq_reg;
+    wire host_irq_notify;
     wire cpu_soft_rst_n; // CPU Soft Reset Control Register
 
     wire internal_cp_trap;
     
     assign rv_reset_n = cpu_soft_rst_n;
     assign rv_trap = internal_cp_trap;
-    assign rv_irq = irq_reg;
+    // irq_reg is the host command doorbell. The GPC completion source is held
+    // until firmware writes REG_INT_ACK, so PicoRV32 cannot miss a short pulse.
+    wire gpu_completion_irq;
+    assign rv_irq = irq_reg | gpu_completion_irq;
     
     picorv32_axi #(
         .ENABLE_IRQ(1),
@@ -195,7 +199,8 @@ module gpu_top (
         .rst_n              (sys_rst_n),
         .s_axi_lite         (ctrl_axi),
         .irq_out            (irq_reg),
-        .cpu_soft_rst_n_out (cpu_soft_rst_n)
+        .cpu_soft_rst_n_out (cpu_soft_rst_n),
+        .host_irq_notify    (host_irq_notify)
     );
 
 
@@ -250,20 +255,15 @@ module gpu_top (
         .rsta_busy()
     );
 
-    // Interrupt Handshake Logic for PCIe XDMA
-    reg cp_trap_d;
+    // Firmware only emits host_irq_notify after updating ring.head. Convert
+    // that event to an XDMA request held until usr_irq_ack.
     reg irq_req_reg;
-    
-    wire trap_edge = internal_cp_trap & ~cp_trap_d;
 
     always @(posedge clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
-            cp_trap_d <= 1'b0;
             irq_req_reg <= 1'b0;
         end else begin
-            cp_trap_d <= internal_cp_trap;
-            
-            if (trap_edge) begin
+            if (host_irq_notify) begin
                 irq_req_reg <= 1'b1;
             end else if (usr_irq_ack) begin
                 irq_req_reg <= 1'b0;
@@ -284,7 +284,8 @@ module gpu_top (
         .s_axi_lite (rv_gpu_axil),
         .m_axi_gmem (m_axi_gmem),
         .gpc_busy (gpc_busy),
-        .l2_act (l2_act)
+        .l2_act (l2_act),
+        .gpu_completion_irq (gpu_completion_irq)
     );
 
 endmodule

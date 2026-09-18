@@ -18,7 +18,8 @@ module gpc_top #(
 
     // Status Activity Outputs
     output wire gpc_busy,
-    output wire l2_act
+    output wire l2_act,
+    output wire gpu_completion_irq
 );
 
     // Reset Pipeline (Level 1)
@@ -73,7 +74,8 @@ module gpc_top #(
         .iram_we          (iram_we_reg),
         .iram_waddr       (iram_waddr_reg),
         .iram_wdata       (iram_wdata_reg),
-        .grid_done_status (grid_done_status)
+        .grid_done_status (grid_done_status),
+        .completion_irq   (gpu_completion_irq)
 `ifdef ENABLE_GPU_DEBUG
         ,
         .debug_tbs         (debug_tbs),
