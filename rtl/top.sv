@@ -106,6 +106,7 @@ module top (
     wire usr_irq_req;
     wire usr_irq_ack;
     wire msi_enable;
+    wire irq_pending_debug;
 
     // 2. AXI Bus Interfaces
     axi_lite_if #(.ADDR_W(32), .DATA_W(32)) xdma_rv_axil();
@@ -192,6 +193,7 @@ module top (
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
         .msi_enable (msi_enable),
+        .irq_pending_debug (irq_pending_debug),
         .msi_vector_width(),
 
         // BAR0 AXI4-Lite Control Bus (Mailbox 0x3F00)
@@ -693,8 +695,10 @@ module top (
 
     // Static Hardware Status LED Indicators
     // Active-low LEDs: Outputting 0 turns the LED ON.
-    assign led1 = ~user_lnk_up;      // LED1: PCIe Link Up (Solid ON when PCIe Link trained and active)
-    assign led2 = ~mig_calib_done;   // LED2: DDR3 Ready (Solid ON when DDR3 calibration succeeds)
-    assign led3 = ~rv_reset_n;       // LED3: PicoRV32 Active (Solid ON when CPU released from reset and running)
+    // MSI interrupt-delivery debug probes. LEDs are active-low, therefore
+    // an illuminated LED means the corresponding signal is asserted.
+    assign led1 = ~msi_enable;        // Host enabled MSI in XDMA configuration space.
+    assign led2 = ~irq_pending_debug; // Firmware notified host; event waits for XDMA ack.
+    assign led3 = ~usr_irq_req;       // Actual user-IRQ request currently presented to XDMA.
     assign led4 = ~gpu_gpc_busy;     // LED4: GPC Compute Activity (Solid ON when GPU Compute Task is running, OFF when idle)
 endmodule

@@ -19,6 +19,8 @@ module gpu_top (
     output wire usr_irq_req,
     input wire usr_irq_ack,
     input wire msi_enable,
+    // Debug-only visibility of the latched firmware-to-host IRQ event.
+    output wire irq_pending_debug,
     
     // UART Physical Interface
     input wire uart_rxd,
@@ -273,6 +275,7 @@ module gpu_top (
     end
 
     assign usr_irq_req = irq_pending && msi_enable;
+    assign irq_pending_debug = irq_pending;
 
     // Host / Mailbox Activity: Tracks Host PCIe XDMA transactions (prevents continuous PicoRV32 instruction fetches from keeping LED permanently ON)
     assign bram_act = (s_axi_lite.awvalid & s_axi_lite.awready) |
