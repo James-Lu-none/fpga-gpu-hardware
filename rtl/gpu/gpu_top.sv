@@ -18,6 +18,7 @@ module gpu_top (
     // PCIe Host Interrupts
     output wire usr_irq_req,
     input wire usr_irq_ack,
+    input wire msi_enable,
     
     // UART Physical Interface
     input wire uart_rxd,
@@ -255,23 +256,23 @@ module gpu_top (
         .rsta_busy()
     );
 
-    // Firmware only emits host_irq_notify after updating ring.head. Convert
-    // that event to an XDMA request held until usr_irq_ack.
-    reg irq_req_reg;
+    // Firmware only emits host_irq_notify after updating ring.head. Preserve
+    // the event until the host has enabled MSI and XDMA acknowledges it.
+    reg irq_pending;
 
     always @(posedge clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
-            irq_req_reg <= 1'b0;
+            irq_pending <= 1'b0;
         end else begin
             if (host_irq_notify) begin
-                irq_req_reg <= 1'b1;
+                irq_pending <= 1'b1;
             end else if (usr_irq_ack) begin
-                irq_req_reg <= 1'b0;
+                irq_pending <= 1'b0;
             end
         end
     end
 
-    assign usr_irq_req = irq_req_reg;
+    assign usr_irq_req = irq_pending && msi_enable;
 
     // Host / Mailbox Activity: Tracks Host PCIe XDMA transactions (prevents continuous PicoRV32 instruction fetches from keeping LED permanently ON)
     assign bram_act = (s_axi_lite.awvalid & s_axi_lite.awready) |

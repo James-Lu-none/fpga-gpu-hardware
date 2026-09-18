@@ -105,6 +105,7 @@ module top (
     // Interrupt Signals
     wire usr_irq_req;
     wire usr_irq_ack;
+    wire msi_enable;
 
     // 2. AXI Bus Interfaces
     axi_lite_if #(.ADDR_W(32), .DATA_W(32)) xdma_rv_axil();
@@ -190,7 +191,7 @@ module top (
         // Interrupt Ports
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
-        .msi_enable (),
+        .msi_enable (msi_enable),
         .msi_vector_width(),
 
         // BAR0 AXI4-Lite Control Bus (Mailbox 0x3F00)
@@ -647,6 +648,7 @@ module top (
         .m_axi_gmem (gpu_xbar_axi),
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
+        .msi_enable (msi_enable),
         .uart_rxd (uart_rxd),
         .uart_txd (uart_txd),
         .rv_reset_n  (rv_reset_n),
