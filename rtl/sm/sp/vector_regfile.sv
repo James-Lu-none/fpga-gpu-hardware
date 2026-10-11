@@ -60,6 +60,7 @@ module vector_regfile (
     reg [DATA_W-1:0] rs2_data_read;
 
     // Pipeline registers for control signals
+    reg [7:0] addr_rs1_q, addr_rs2_q;
     reg decode_valid_q;
     reg [$clog2(MAX_WARPS)-1:0] decode_warp_id_q;
     reg [11:0] decode_pc_q;
@@ -80,8 +81,12 @@ module vector_regfile (
         // We write this data into BOTH ram_rs1 and ram_rs2 at the same time to keep them synced.
         if (wb.valid && (wb.rd != 5'd0)) begin // Assuming R0 is read-only zero or normal reg
             // alus will write back in format {alu1_out, alu0_out}
-            ram_rs1[addr_wb] <= wb.data;
-            ram_rs2[addr_wb] <= wb.data;
+            for (int lane = 0; lane < NUM_LANES; lane++) begin
+                if (wb.mask[lane]) begin
+                    ram_rs1[addr_wb][lane*32 +: 32] <= wb.data[lane*32 +: 32];
+                    ram_rs2[addr_wb][lane*32 +: 32] <= wb.data[lane*32 +: 32];
+                end
+            end
         end
 
         // Read Ports (1 cycle latency)
@@ -100,6 +105,8 @@ module vector_regfile (
         if (!rst_n) begin
             decode_valid_q <= 1'b0;
         end else begin
+            addr_rs1_q <= addr_rs1;
+            addr_rs2_q <= addr_rs2;
             decode_valid_q <= decode.valid;
             decode_warp_id_q <= decode.warp_id;
             decode_pc_q <= decode.pc;
@@ -133,8 +140,8 @@ module vector_regfile (
                 op.imm <= decode_imm_q;
                 op.is_imm <= decode_is_imm_q;
                 
-                op.rs1_data <= rs1_data_read;
-                op.rs2_data <= rs2_data_read;
+                op.rs1_data <= (addr_rs1_q[4:0] == 0) ? '0 : rs1_data_read;
+                op.rs2_data <= (addr_rs2_q[4:0] == 0) ? '0 : rs2_data_read;
             end
         end
     end
