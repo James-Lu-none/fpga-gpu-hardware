@@ -43,7 +43,7 @@ module l2_cache #(
     input wire m_axi_rlast,
     output wire m_axi_rready
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [15:0] debug_l2
+    , output reg [PERF_COUNT-1:0] perf_events
 `endif
 );
     localparam PORT_SEL_W = (NUM_PORTS > 1) ? $clog2(NUM_PORTS) : 1;
@@ -121,6 +121,9 @@ module l2_cache #(
         .flush (flush),
         .core (core_bus),
         .memory (memory_bus)
+`ifdef ENABLE_GPU_DEBUG
+        , .perf_events(cache_events)
+`endif
     );
 
     function [PORT_SEL_W-1:0] next_port(input [PORT_SEL_W-1:0] port);
@@ -156,14 +159,12 @@ module l2_cache #(
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    assign debug_l2 = {
-        m_axi_rready, m_axi_rvalid,
-        m_axi_arready, m_axi_arvalid,
-        m_axi_bready, m_axi_bvalid,
-        m_axi_wready, m_axi_wvalid,
-        m_axi_awready, m_axi_awvalid,
-        core_bus.req_ready, selected_valid,
-        1'b0, 3'd0
-    };
+    wire [PERF_COUNT-1:0] cache_events;
+    always_comb begin
+        perf_events = '0;
+        perf_events[PERF_L2_REQ] = cache_events[PERF_L1_REQ];
+        perf_events[PERF_L2_HIT] = cache_events[PERF_L1_HIT];
+        perf_events[PERF_L2_MISS] = cache_events[PERF_L1_MISS];
+    end
 `endif
 endmodule

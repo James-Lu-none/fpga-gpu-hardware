@@ -18,7 +18,8 @@ module sp_ctrl (
     output reg [$clog2(MAX_WARPS)-1:0] ex1_warp_id,
     output reg [4:0] ex1_rd
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [31:0] debug_warp_status, debug_warp_extra, debug_warp_states
+    , input wire perf_clear,
+    output wire [PERF_COUNT-1:0] perf_events
 `endif
 );
     // LSU completions must be queued independently of ALU write-back. A
@@ -115,10 +116,7 @@ module sp_ctrl (
         .issue (issue),
         .ctx_wb (ctx_wb)
 `ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_warp_status (debug_warp_status),
-        .debug_warp_extra (debug_warp_extra),
-        .debug_warp_states (debug_warp_states)
+        , .perf_clear(perf_clear), .perf_events(perf_events)
 `endif
     );
 

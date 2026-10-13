@@ -34,9 +34,7 @@ module lsu (
     // Write-Back Interface to Context Scheduler
     ctx_wb_if.master ctx_wb
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [31:0] debug_lsu,
-    output wire [31:0] debug_lsu_addr,
-    output wire [31:0] debug_lsu_state
+    , output reg [PERF_COUNT-1:0] perf_events
 `endif
 );
     localparam OP_LDR = 8'hA0;
@@ -227,33 +225,12 @@ module lsu (
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    assign debug_lsu_addr = l1_req_addr;
-    assign debug_lsu = {
-        25'd0,
-        l1_rsp_valid,
-        l1_req_ready,
-        l1_req_valid,
-        lsu_ready,
-        active_is_load,
-        state
-    };
-
-    // Extended live snapshot for diagnosing occupancy-boundary deadlocks.
-    // The existing debug_lsu word is kept stable for software compatibility;
-    // this word exposes the queued request ownership and retirement signals.
-    assign debug_lsu_state = {
-        fifo_count[3:0],
-        fifo_rd_ptr[2:0],
-        fifo_wr_ptr[2:0],
-        active_warp_id[2:0],
-        active_pc[11:0],
-        active_lane1_pending,
-        active_is_uniform,
-        active_is_load,
-        l1_rsp_valid,
-        l1_req_valid,
-        l1_req_ready,
-        ctx_wb.valid
-    };
+    always_comb begin
+        perf_events = '0;
+        perf_events[PERF_LSU_FIFO_PUSH] = fifo_push;
+        perf_events[PERF_LSU_FIFO_POP] = fifo_pop;
+        perf_events[PERF_LSU_WAIT_CYCLES] = state == ST_WAIT;
+        perf_events[PERF_LSU_FIFO_FULL_CYCLES] = fifo_count == FIFO_DEPTH;
+    end
 `endif
 endmodule

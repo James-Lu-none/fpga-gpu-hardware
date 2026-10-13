@@ -23,11 +23,8 @@ module warp_context (
     // Feedback Interface (From Execution Pipeline)
     ctx_wb_if.slave ctx_wb
 `ifdef ENABLE_GPU_DEBUG
-    ,
-    // Debug Status Outputs
-    output wire [31:0] debug_warp_status,
-    output wire [31:0] debug_warp_extra,
-    output wire [31:0] debug_warp_states
+    , input wire perf_clear,
+    output reg [PERF_COUNT-1:0] perf_events
 `endif
 );
 
@@ -186,30 +183,31 @@ module warp_context (
         end
     end
 
+
 `ifdef ENABLE_GPU_DEBUG
-    // Debug Status Multiplexing
-    assign debug_warp_status = {
-        simt_sp[1][1:0], warp_state[1][1:0], warp_pc[1][11:0], // [31:16]: Warp 1
-        simt_sp[0][1:0], warp_state[0][1:0], warp_pc[0][11:0]  // [15:0]:  Warp 0
-    };
-
-    assign debug_warp_extra = {
-        warp_mask[0][15:0],          // [31:16]: Warp 0 active mask
-        rr_idx[3:0],                 // [15:12]: Round-robin pointer
-        ctx_wb.valid,                // [11]: ctx_wb valid
-        3'(ctx_wb.warp_id),          // [10:8]: ctx_wb warp_id
-        issue.valid,                 // [7]: issue valid
-        3'(issue.warp_id),           // [6:4]: issue warp_id
-        warp_state[2][1:0],          // [3:2]: Warp 2 state
-        warp_state[3][1:0]           // [1:0]: Warp 3 state
-    };
-
-    // Complete resident-warp state snapshot: warp N occupies bits [2*N +: 2].
-    // 0=FREE, 1=READY, 2=STALL, 3=DONE.
-    for (genvar d = 0; d < MAX_WARPS; d = d + 1) begin : gen_warp_state_debug
-        assign debug_warp_states[d*2 +: 2] = warp_state[d];
+    reg previous_issue_valid;
+    reg [$clog2(MAX_WARPS)-1:0] previous_warp;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            previous_issue_valid <= 0;
+            previous_warp <= 0;
+        end else if (perf_clear) begin
+            previous_issue_valid <= 0;
+        end else if (issue.valid) begin
+            previous_issue_valid <= 1;
+            previous_warp <= issue.warp_id;
+        end
     end
-    assign debug_warp_states[31:16] = 16'd0;
+    always_comb begin
+        perf_events = '0;
+        perf_events[PERF_INST_RETIRED] = ctx_wb.valid;
+        perf_events[PERF_WARP_ISSUE] = issue.valid;
+        perf_events[PERF_WARP_SWAP] = issue.valid && previous_issue_valid && issue.warp_id != previous_warp;
+        perf_events[PERF_WARP_DONE] = ctx_wb.valid && ctx_wb.is_done;
+        perf_events[PERF_SIMT_STACK_PUSH] = ctx_wb.valid && !ctx_wb.is_done &&
+            (ctx_wb.is_ssy || ctx_wb.is_divergent) && simt_sp[ctx_wb.warp_id] < 4;
+        perf_events[PERF_SIMT_STACK_POP] = ctx_wb.valid && !ctx_wb.is_done &&
+            !ctx_wb.is_ssy && !ctx_wb.is_divergent && ctx_wb.is_sync && simt_sp[ctx_wb.warp_id] > 0;
+    end
 `endif
-
 endmodule

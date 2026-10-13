@@ -23,7 +23,7 @@ module sp_dpath (
     input wire l1_req_ready, l1_rsp_valid,
     input wire [DATA_W-1:0] l1_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [31:0] debug_lsu, debug_lsu_addr, debug_lsu_state
+    , output wire [PERF_COUNT-1:0] perf_events
 `endif
 );
     decode_if decode();
@@ -146,10 +146,7 @@ module sp_dpath (
         .wb (lsu_wb),
         .ctx_wb (ctx_lsu_wb)
 `ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_lsu (debug_lsu),
-        .debug_lsu_addr (debug_lsu_addr),
-        .debug_lsu_state (debug_lsu_state)
+        , .perf_events(perf_events)
 `endif
     );
 

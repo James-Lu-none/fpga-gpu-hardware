@@ -32,17 +32,8 @@ module gpc_control_register (
     // clears the completion status.
     output wire       completion_irq
 `ifdef ENABLE_GPU_DEBUG
-    ,
-    // Debug Status Inputs
-    input wire [31:0] debug_tbs,
-    input wire [31:0] debug_sm,
-    input wire [31:0] debug_warp_status,
-    input wire [31:0] debug_warp_extra,
-    input wire [31:0] debug_lsu,
-        input wire [31:0] debug_warp_states,
-    input wire [31:0] debug_lsu_addr,
-    input wire [31:0] debug_lsu_state,
-    input wire [31:0] debug_l1_l2
+    , input wire [31:0] perf_increments [0:gpu_pkg::PERF_COUNT-1],
+    output wire perf_clear
 `endif
 );
 
@@ -203,6 +194,12 @@ module gpc_control_register (
                 axi_rresp  <= 2'b00; // OKAY
 
                 if (!s_axi_lite.araddr[12]) begin
+`ifdef ENABLE_GPU_DEBUG
+                    if (s_axi_lite.araddr[11:0] >= 12'h030 &&
+                        s_axi_lite.araddr[11:0] < 12'h030 + gpu_pkg::PERF_COUNT*4 && s_axi_lite.araddr[1:0] == 0)
+                        axi_rdata <= perf_counters[$clog2(gpu_pkg::PERF_COUNT)'((s_axi_lite.araddr[11:0] - 12'h030) >> 2)];
+                    else
+`endif
                     case (s_axi_lite.araddr[7:0])
                         8'h04:   axi_rdata <= {31'd0, grid_done_reg};
                         8'h0C:   axi_rdata <= {16'd0, grid_dim_x};
@@ -211,17 +208,6 @@ module gpc_control_register (
                         8'h18:   axi_rdata <= {16'd0, block_dim_y};
                         8'h20:   axi_rdata <= src_addr;
                         8'h24:   axi_rdata <= dst_addr;
-`ifdef ENABLE_GPU_DEBUG
-                        8'h30:   axi_rdata <= debug_tbs;
-                        8'h34:   axi_rdata <= debug_sm;
-                        8'h38:   axi_rdata <= debug_warp_status;
-                        8'h3C:   axi_rdata <= debug_warp_extra;
-                            8'h50:   axi_rdata <= debug_warp_states;
-                        8'h40:   axi_rdata <= debug_lsu;
-                        8'h44:   axi_rdata <= debug_lsu_addr;
-                        8'h48:   axi_rdata <= debug_l1_l2;
-                        8'h4C:   axi_rdata <= debug_lsu_state;
-`endif
                         default: axi_rdata <= 32'd0;
                     endcase
                 end else begin
@@ -233,4 +219,28 @@ module gpc_control_register (
         end
     end
 
+`ifdef ENABLE_GPU_DEBUG
+    reg [31:0] perf_counters [0:gpu_pkg::PERF_COUNT-1];
+    reg perf_running;
+    wire manual_clear = aw_done && w_done && !axi_bvalid &&
+        !latched_awaddr[12] && latched_awaddr[11:0] == 12'h02c && latched_wstrb[0] && latched_wdata[0];
+    assign perf_clear = hw_trigger || manual_clear;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            perf_running <= 0;
+            for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
+        end else begin
+            if (hw_trigger) perf_running <= 1;
+            else if (grid_done_status) perf_running <= 0;
+            if (perf_clear) begin
+                for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
+            end else if (perf_running) begin
+                for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) begin
+                    if (c == gpu_pkg::PERF_CYCLE) perf_counters[c] <= perf_counters[c] + 1;
+                    else perf_counters[c] <= perf_counters[c] + perf_increments[c];
+                end
+            end
+        end
+    end
+`endif
 endmodule

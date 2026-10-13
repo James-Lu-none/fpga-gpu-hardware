@@ -45,20 +45,23 @@ module gpc_top #(
 
     wire        grid_done_status;
 
-`ifdef ENABLE_GPU_DEBUG
-    // Debug Status Interconnect
-    wire [31:0] debug_tbs;
-    wire [31:0] sm_debug_sm          [0:NUM_SM_INST-1];
-    wire [31:0] sm_debug_warp_status [0:NUM_SM_INST-1];
-    wire [31:0] sm_debug_warp_extra  [0:NUM_SM_INST-1];
-        wire [31:0] sm_debug_warp_states [0:NUM_SM_INST-1];
-    wire [31:0] sm_debug_lsu         [0:NUM_SM_INST-1];
-    wire [31:0] sm_debug_lsu_addr    [0:NUM_SM_INST-1];
-    wire [31:0] sm_debug_lsu_state   [0:NUM_SM_INST-1];
-    wire [15:0] sm_debug_l1          [0:NUM_SM_INST-1];
-    wire [15:0] debug_l2;
-`endif
 
+`ifdef ENABLE_GPU_DEBUG
+    wire perf_clear;
+    wire [31:0] sm_perf_increments [0:NUM_SM_INST-1][0:PERF_COUNT-1];
+    wire [PERF_COUNT-1:0] l2_perf_events;
+    reg [31:0] perf_increments [0:PERF_COUNT-1];
+    always_comb begin
+        for (int c = 0; c < PERF_COUNT; c++) begin
+            perf_increments[c] = 32'(l2_perf_events[c]);
+            for (int sm = 0; sm < NUM_SM_INST; sm++)
+                perf_increments[c] = perf_increments[c] + sm_perf_increments[sm][c];
+        end
+        perf_increments[PERF_AXI_READ_STALL_CYCLES] = 32'(m_axi_gmem.arvalid && !m_axi_gmem.arready);
+        perf_increments[PERF_AXI_WRITE_STALL_CYCLES] = 32'((m_axi_gmem.awvalid && !m_axi_gmem.awready) ||
+            (m_axi_gmem.wvalid && !m_axi_gmem.wready));
+    end
+`endif
     gpc_control_register u_gpc_ctrl (
         .clk              (clk),
         .rst_n            (gpc_rst_n),
@@ -77,16 +80,7 @@ module gpc_top #(
         .grid_done_status (grid_done_status),
         .completion_irq   (gpu_completion_irq)
 `ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_tbs         (debug_tbs),
-        .debug_sm          (sm_debug_sm[0]),
-        .debug_warp_status (sm_debug_warp_status[0]),
-        .debug_warp_extra  (sm_debug_warp_extra[0]),
-        .debug_warp_states (sm_debug_warp_states[0]),
-        .debug_lsu         (sm_debug_lsu[0]),
-        .debug_lsu_addr    (sm_debug_lsu_addr[0]),
-        .debug_lsu_state   (sm_debug_lsu_state[0]),
-        .debug_l1_l2       ({sm_debug_l1[0], debug_l2})
+        , .perf_clear(perf_clear), .perf_increments(perf_increments)
 `endif
     );
 
@@ -114,10 +108,6 @@ module gpc_top #(
         .sm_block_idx_y (sm_block_idx_y),
         .sm_warps_per_block (sm_warps_per_block),
         .busy (gpc_busy)
-`ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_tbs (debug_tbs)
-`endif
     );
 
     // 3. Parameterized SM Array (NUM_SM_INST SMs)
@@ -161,15 +151,7 @@ module gpc_top #(
             .l1_rsp_valid         (sm_l1_rsp_valid[n]),
             .l1_rsp_rdata         (sm_l1_rsp_rdata[n])
 `ifdef ENABLE_GPU_DEBUG
-            ,
-            .debug_sm             (sm_debug_sm[n]),
-            .debug_warp_status    (sm_debug_warp_status[n]),
-            .debug_warp_extra     (sm_debug_warp_extra[n]),
-            .debug_warp_states    (sm_debug_warp_states[n]),
-            .debug_lsu            (sm_debug_lsu[n]),
-            .debug_lsu_addr       (sm_debug_lsu_addr[n]),
-            .debug_lsu_state      (sm_debug_lsu_state[n]),
-            .debug_l1             (sm_debug_l1[n])
+            , .perf_clear(perf_clear), .perf_increments(sm_perf_increments[n])
 `endif
         );
     end
@@ -181,10 +163,6 @@ module gpc_top #(
         .clk             (clk),
         .rst_n           (gpc_rst_n),
         .flush           (cache_flush)
-`ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_l2        (debug_l2)
-`endif
         ,
         
         .sm_req_valid    (sm_l1_req_valid),
@@ -223,6 +201,9 @@ module gpc_top #(
         .m_axi_rdata     (m_axi_gmem.rdata),
         .m_axi_rlast     (m_axi_gmem.rlast),
         .m_axi_rready    (m_axi_gmem.rready)
+`ifdef ENABLE_GPU_DEBUG
+        , .perf_events(l2_perf_events)
+`endif
     );
 
     // L2 Cache Activity: Any L1-to-L2 request or L2-to-DDR3 AXI handshake

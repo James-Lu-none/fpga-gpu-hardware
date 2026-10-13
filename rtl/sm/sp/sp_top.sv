@@ -27,14 +27,8 @@ module sub_partition (
     input wire l1_rsp_valid,
     input wire [DATA_W-1:0] l1_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
-    ,
-    // Debug Status Outputs
-    output wire [31:0] debug_warp_status,
-    output wire [31:0] debug_warp_extra,
-    output wire [31:0] debug_warp_states,
-    output wire [31:0] debug_lsu,
-    output wire [31:0] debug_lsu_addr,
-    output wire [31:0] debug_lsu_state
+    , input wire perf_clear,
+    output wire [PERF_COUNT-1:0] perf_events
 `endif
 );
 
@@ -46,6 +40,10 @@ module sub_partition (
     end
     wire core_rst_n = core_rst_n_reg;
 
+`ifdef ENABLE_GPU_DEBUG
+    wire [PERF_COUNT-1:0] ctrl_events, dpath_events;
+    assign perf_events = ctrl_events | dpath_events;
+`endif
     // Inter-module Interconnect Interfaces
     issue_if issue();
     operand_if op();
@@ -93,10 +91,7 @@ module sub_partition (
         .ex1_warp_id(ex1_warp_id),
         .ex1_rd(ex1_rd)
 `ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_warp_status(debug_warp_status),
-        .debug_warp_extra(debug_warp_extra),
-        .debug_warp_states(debug_warp_states)
+        , .perf_clear(perf_clear), .perf_events(ctrl_events)
 `endif
     );
     sp_dpath u_sp_dpath (
@@ -126,10 +121,7 @@ module sub_partition (
         .l1_rsp_valid(l1_rsp_valid),
         .l1_rsp_rdata(l1_rsp_rdata)
 `ifdef ENABLE_GPU_DEBUG
-        ,
-        .debug_lsu(debug_lsu),
-        .debug_lsu_addr(debug_lsu_addr),
-        .debug_lsu_state(debug_lsu_state)
+        , .perf_events(dpath_events)
 `endif
     );
 endmodule

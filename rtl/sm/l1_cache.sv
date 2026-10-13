@@ -23,7 +23,7 @@ module l1_cache (
     input wire l2_rsp_valid,
     input wire [255:0] l2_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [15:0] debug_l1
+    , output wire [PERF_COUNT-1:0] perf_events
 `endif
 );
     cache_line_if #(.ADDR_W(32), .DATA_W(256)) core_bus();
@@ -87,18 +87,9 @@ module l1_cache (
         .flush (flush),
         .core (core_bus),
         .memory (l2_bus)
+`ifdef ENABLE_GPU_DEBUG
+        , .perf_events(perf_events)
+`endif
     );
 
-`ifdef ENABLE_GPU_DEBUG
-    assign debug_l1 = {
-        8'd0,
-        l2_bus.rsp_valid,
-        l2_bus.req_ready,
-        l2_bus.req_valid,
-        core_bus.rsp_valid,
-        core_bus.req_ready,
-        core_bus.req_we,
-        2'd0
-    };
-`endif
 endmodule
