@@ -3,7 +3,7 @@
 set -euo pipefail
 rm -f compiler.log rtl.log memory.bin counters.txt execution.txt gpc.vcd
 if ! {
-    "$FPGAGPU_CLANG" -x kernel.c -o kernel.hex &&
+    "$FPGAGPU_CLANG" --save-temps -x kernel.c -o kernel.hex &&
     "$FPGAGPU_CLANG" -S kernel.c -o kernel.s
 } > compiler.log 2>&1; then
     cat compiler.log >&2
