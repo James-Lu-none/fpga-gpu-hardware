@@ -221,3 +221,43 @@ The entire system uses XDMA's generated clock (axi_aclk: 125MHz) and asynchronou
   original combinational route/pipline: current_sm (Arbiter MUX) -> req_addr (sliced into req_index) -> valid_ram / tag_ram (LUTRAM Asynchronous Read) -> 18-bit Tag Comparator -> FSM Logic -> valid_ram WE / m_axi_awaddr.
   This 1-cycle cache architecture puts the arbitration MUX, RAM read, Tag compare, and AXI state transition all in a single cycle (`STATE_IDLE`), causing a massive combinational path.
   Fix: We pipelined the L2 cache arbitration by introducing a new FSM state `STATE_COMPARE`. In `STATE_IDLE`, the arbiter only determines the winning SM and latches the request into pipeline registers (`latched_req_*`). In `STATE_COMPARE`, the FSM uses the latched request to index the RAMs, execute the hit/miss logic, and determine the next AXI state. This isolates the arbitration MUX into its own cycle and completely breaks the critical path into the Cache RAM address decoders.
+
+## RTL simulation
+
+```bash
+make -C sim check
+```
+
+# GPU performance counters
+
+| AXI-Lite offset | Counter | Event definition |
+| --- | --- | --- |
+| `0x30` | `cycle_count` | GPC capture cycles (not summed SM cycles). |
+| `0x34` | `inst_retired_count` | Committed warp instructions at ctx_wb.valid, including CMP, control flow, loads, stores and EXIT; not individual lane instructions. |
+| `0x38` | `warp_issue_count` | Valid scheduled warp instructions delivered to fetch. |
+| `0x3c` | `warp_swap_count` | A SP issues a different warp ID than its previous valid issue, ignoring intervening bubbles. First issue after clear is excluded. This is interleaving, not a hardware context-copy operation. |
+| `0x40` | `l1_req_count` | Accepted L1 core requests (VALID and READY), summed across SMs. |
+| `0x44` | `l1_hit_count` | One valid tag match in L1 lookup per request. |
+| `0x48` | `l1_miss_count` | One invalid/tag-mismatched L1 lookup per request. |
+| `0x4c` | `l2_req_count` | Accepted L2 core requests from all SMs. |
+| `0x50` | `l2_hit_count` | One valid tag match in L2 lookup per request. |
+| `0x54` | `l2_miss_count` | One invalid/tag-mismatched L2 lookup per request. |
+| `0x58` | `lsu_fifo_push_count` | Accepted memory instructions enqueued into LSU instruction FIFOs. |
+| `0x5c` | `lsu_fifo_pop_count` | LSU FIFO instructions dequeued into their active engines. |
+| `0x60` | `simt_stack_push_count` | Successful SSY or divergence stack pushes (overflow attempts excluded). |
+| `0x64` | `simt_stack_pop_count` | Successful SYNC stack pops (empty-stack SYNC excluded). |
+| `0x68` | `lsu_wait_cycles_count` | Sum of SP cycles in LSU ST_WAIT, including the response arrival cycle. |
+| `0x6c` | `lsu_fifo_full_cycles_count` | Sum of SP cycles with LSU instruction FIFO at capacity. |
+| `0x70` | `axi_read_stall_cycles_count` | GPC cycles with AXI ARVALID and not ARREADY. |
+| `0x74` | `axi_write_stall_cycles_count` | GPC cycles with stalled AXI AW or W; a cycle stalling both counts once. |
+| `0x78` | `warp_done_count` | Committed EXIT instructions, one per completed warp. |
+
+Cache tag statistics include reads and writes. A write with a matching tag
+is a hit but still writes through to memory, so AXI transaction totals are not
+identical to cache misses. After completion, `req_count = hit_count + miss_count`
+
+at each cache. Partial captures during execution can have requests awaiting
+lookup, so this equality need not hold mid-kernel.
+LSU FIFO counters count instructions, not lane memory beats; divergent addresses
+can generate multiple cache requests per instruction. Summed LSU wait/full
+cycles can exceed GPC `cycle_count` because several SPs wait simultaneously.
