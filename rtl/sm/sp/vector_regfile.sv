@@ -121,29 +121,20 @@ module vector_regfile (
         end
     end
 
-    // Operand Formatting (Output to ALU)
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            op.valid <= 1'b0;
-        end else begin
-            op.valid <= decode_valid_q;
-            
-            if (decode_valid_q) begin
-                op.warp_id <= decode_warp_id_q;
-                op.pc <= decode_pc_q;
-                op.active_mask <= decode_active_mask_q;
-                op.block_idx_x <= decode_block_idx_x_q;
-                op.block_idx_y <= decode_block_idx_y_q;
-                op.thread_id_start <= decode_thread_id_start_q;
-                op.opcode <= decode_opcode_q;
-                op.rd <= decode_rd_q;
-                op.imm <= decode_imm_q;
-                op.is_imm <= decode_is_imm_q;
-                
-                op.rs1_data <= (addr_rs1_q[4:0] == 0) ? '0 : rs1_data_read;
-                op.rs2_data <= (addr_rs2_q[4:0] == 0) ? '0 : rs2_data_read;
-            end
-        end
-    end
+    // BRAM data and metadata above are registered on the same edge.
+    // Expose them directly as the operand stage, without another register layer.
+    assign op.valid = decode_valid_q;
+    assign op.warp_id = decode_warp_id_q;
+    assign op.pc = decode_pc_q;
+    assign op.active_mask = decode_active_mask_q;
+    assign op.block_idx_x = decode_block_idx_x_q;
+    assign op.block_idx_y = decode_block_idx_y_q;
+    assign op.thread_id_start = decode_thread_id_start_q;
+    assign op.opcode = decode_opcode_q;
+    assign op.rd = decode_rd_q;
+    assign op.imm = decode_imm_q;
+    assign op.is_imm = decode_is_imm_q;
+    assign op.rs1_data = (addr_rs1_q[4:0] == 0) ? '0 : rs1_data_read;
+    assign op.rs2_data = (addr_rs2_q[4:0] == 0) ? '0 : rs2_data_read;
 
 endmodule

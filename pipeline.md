@@ -195,7 +195,8 @@ When ctx_wb.valid returns:
   rs1_data_read <= ram_rs1[addr_rs1];
   rs2_data_read <= ram_rs2[addr_rs2];
 - Control signals delayed by 1 cycle (decode_*_q) to align with BRAM data output.
-- Assembles operand_if:
+- Drives operand_if directly from the registered BRAM outputs and aligned control signals; no extra operand output register stage. R0 reads are forced to zero using the delayed source register indexes.
+- Operand interface:
   op.valid, op.rs1_data, op.rs2_data, op.imm, op.opcode, op.rd, op.warp_id, op.active_mask
 
 ### 7. Execution Pipeline (ALU Lanes & LSU)
