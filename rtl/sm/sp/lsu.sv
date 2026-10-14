@@ -49,6 +49,7 @@ module lsu (
     localparam FIFO_PTR_W = (FIFO_DEPTH > 1) ? $clog2(FIFO_DEPTH) : 1;
 
     reg [1:0] state;
+    reg [31:0] active_mask;
     reg active_is_load;
     reg active_is_uniform;
     reg active_lane1_pending;
@@ -67,6 +68,7 @@ module lsu (
     reg [$clog2(MAX_WARPS)-1:0] fifo_warp_id [0:FIFO_DEPTH-1];
     reg [11:0] fifo_pc [0:FIFO_DEPTH-1];
     reg [4:0] fifo_rd [0:FIFO_DEPTH-1];
+    reg [31:0] fifo_mask [0:FIFO_DEPTH-1];
     reg fifo_is_load [0:FIFO_DEPTH-1];
     reg [31:0] fifo_addr [0:FIFO_DEPTH-1];
     reg [31:0] fifo_lane1_addr [0:FIFO_DEPTH-1];
@@ -93,6 +95,7 @@ module lsu (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= ST_IDLE;
+            active_mask <= 0;
             active_is_load <= 1'b0;
             active_is_uniform <= 1'b0;
             active_lane1_pending <= 1'b0;
@@ -129,11 +132,13 @@ module lsu (
                 fifo_pc[fifo_wr_ptr] <= op.pc;
                 fifo_rd[fifo_wr_ptr] <= op.rd;
                 fifo_is_load[fifo_wr_ptr] <= (op.opcode == OP_LDR);
-                fifo_addr[fifo_wr_ptr] <= op.rs1_data[31:0];
+                // Start with the first active lane; never access inactive addresses.
+                fifo_mask[fifo_wr_ptr] <= op.active_mask;
+                fifo_addr[fifo_wr_ptr] <= op.active_mask[0] ? op.rs1_data[31:0] : op.rs1_data[63:32];
                 fifo_lane1_addr[fifo_wr_ptr] <= op.rs1_data[63:32];
-                fifo_wdata[fifo_wr_ptr] <= op.rs2_data;
-                fifo_is_uniform[fifo_wr_ptr] <= is_uniform;
-                fifo_word_sel[fifo_wr_ptr] <= word_sel;
+                fifo_wdata[fifo_wr_ptr] <= op.active_mask[0] ? op.rs2_data : {op.rs2_data[63:32], op.rs2_data[63:32]};
+                fifo_is_uniform[fifo_wr_ptr] <= is_uniform || op.active_mask[1:0] != 2'b11;
+                fifo_word_sel[fifo_wr_ptr] <= op.active_mask[0] ? word_sel : op.rs1_data[34];
                 fifo_lane1_word_sel[fifo_wr_ptr] <= op.rs1_data[34];
                 fifo_wr_ptr <= fifo_wr_ptr + 1'b1;
             end
@@ -152,6 +157,7 @@ module lsu (
                     if (fifo_pop) begin
                         // Pop only in IDLE. Once loaded, this context remains
                         // stable through request acceptance and response wait.
+                        active_mask <= fifo_mask[fifo_rd_ptr];
                         active_is_load <= fifo_is_load[fifo_rd_ptr];
                         active_is_uniform <= fifo_is_uniform[fifo_rd_ptr];
                         active_lane1_pending <= !fifo_is_uniform[fifo_rd_ptr];
@@ -169,6 +175,14 @@ module lsu (
                         l1_req_we <= !fifo_is_load[fifo_rd_ptr];
                         l1_req_wstrb <= fifo_word_sel[fifo_rd_ptr] ? 8'hF0 : 8'h0F;
                         state <= ST_ISSUE;
+                        if (fifo_mask[fifo_rd_ptr][1:0] == 0) begin
+                            // No active lanes: retire without issuing a memory request.
+                            l1_req_valid <= 0;
+                            ctx_wb.valid <= 1;
+                            ctx_wb.warp_id <= fifo_warp_id[fifo_rd_ptr];
+                            ctx_wb.next_pc <= fifo_pc[fifo_rd_ptr] + 12'd1;
+                            state <= ST_IDLE;
+                        end
                     end
                 end
 
@@ -203,7 +217,7 @@ module lsu (
                                 wb.valid <= 1'b1;
                                 wb.warp_id <= active_warp_id;
                                 wb.rd <= active_rd;
-                                wb.mask <= 32'hFFFFFFFF;
+                                wb.mask <= active_mask;
                                 if (active_is_uniform)
                                     wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]} :
                                                                {l1_rsp_rdata[31:0], l1_rsp_rdata[31:0]};
