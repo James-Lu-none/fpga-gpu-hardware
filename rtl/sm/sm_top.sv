@@ -63,7 +63,9 @@ module streaming_multiprocessor #(
 
     reg [2:0] rx_state;
     reg [9:0] warp_cnt;
-    wire [15:0] linear_block_id = block_idx_x + (block_idx_y * 16'd65535);
+    reg [15:0] accepted_block_x, accepted_block_y;
+    reg [9:0] accepted_warps_per_block;
+    wire [15:0] linear_block_id = accepted_block_x + (accepted_block_y * 16'd65535);
 
     warp_alloc_if alloc [0:NUM_SPS-1]();
 
@@ -105,7 +107,9 @@ module streaming_multiprocessor #(
         end
     endgenerate
 
-    assign available_warp_slots = max_free_slots;
+    // Pending block reception reserves this SM until its warps are allocated.
+    // Reporting stale free slots can over-dispatch and declare completion early.
+    assign available_warp_slots = (rx_state == ST_IDLE) ? max_free_slots : 5'd0;
     wire alloc_ready = sp_alloc_ready[alloc_target_sp];
 
     reg alloc_valid_reg;
@@ -118,12 +122,20 @@ module streaming_multiprocessor #(
             alloc_valid_reg    <= 1'b0;
             block_accepted_reg <= 1'b0;
             warp_cnt           <= 10'd0;
+            accepted_block_x <= 0;
+            accepted_block_y <= 0;
+            accepted_warps_per_block <= 0;
         end else begin
             case (rx_state)
                 ST_IDLE: begin
                     alloc_valid_reg    <= 1'b0;
                     block_accepted_reg <= 1'b0;
                     if (block_issue_valid) begin
+                        // TBS may move the shared dispatch bus to another SM
+                        // before this SM has a free warp slot. Keep our context.
+                        accepted_block_x <= block_idx_x;
+                        accepted_block_y <= block_idx_y;
+                        accepted_warps_per_block <= warps_per_block;
                         warp_cnt           <= 10'd0;
                         block_accepted_reg <= 1'b1;
                         rx_state           <= ST_ISSUE_WARP;
@@ -146,7 +158,7 @@ module streaming_multiprocessor #(
                 end
 
                 ST_NEXT_WARP: begin
-                    if (warp_cnt + 1 < warps_per_block) begin
+                    if (warp_cnt + 1 < accepted_warps_per_block) begin
                         warp_cnt <= warp_cnt + 1'b1;
                         rx_state <= ST_ISSUE_WARP;
                     end else begin
@@ -162,8 +174,8 @@ module streaming_multiprocessor #(
     for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_ports
         assign alloc[s].valid            = alloc_valid_reg && (alloc_target_sp == s);
         assign alloc[s].block_id         = linear_block_id;
-        assign alloc[s].block_idx_x      = block_idx_x;
-        assign alloc[s].block_idx_y      = block_idx_y;
+        assign alloc[s].block_idx_x      = accepted_block_x;
+        assign alloc[s].block_idx_y      = accepted_block_y;
         assign alloc[s].thread_id_start  = warp_cnt * WARP_SIZE;
         assign alloc[s].active_mask      = {{(32-NUM_LANES){1'b0}}, {NUM_LANES{1'b1}}};
     end
