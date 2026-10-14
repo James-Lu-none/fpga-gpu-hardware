@@ -9,7 +9,13 @@ BUILD := build
 RTL := ../rtl
 DRIVER := ../../fpga-gpu-driver
 
-TESTS ?= test_opencl_matmul.c test_opencl_vector_add.c test_opencl_matmul_occupancy.c test_opencl_branch_divergence.c
+TESTS ?= \
+	test_opencl_minimal.c \
+	test_opencl_minimal_branch.c \
+	test_opencl_matmul.c \
+	test_opencl_vector_add.c \
+	test_opencl_matmul_occupancy.c \
+	test_opencl_branch_divergence.c
 
 GPC_SOURCES := \
 	$(RTL)/gpu_pkg.sv \
