@@ -118,3 +118,11 @@ impl_*/
 *.bin
 *.pdi
 *.mcs
+
+# RTL simulation artifacts
+/sim/build/
+*.vcd
+
+# Keep simulation C sources
+!/sim/*.c
+!/sim/*.h
