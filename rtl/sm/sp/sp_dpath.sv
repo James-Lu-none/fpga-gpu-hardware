@@ -78,6 +78,7 @@ module sp_dpath (
             if (op.opcode == 8'hB0) begin
                 case (op.imm)
                     32'd0: special = {16'd0, op.thread_id_start} + 32'(k);
+                    32'd1: special = 32'd0; // local Y dimension not supported for now
                     32'd2: special = {16'd0, op.block_idx_x};
                     32'd3: special = {16'd0, op.block_idx_y};
                     default: special = 32'd0;
