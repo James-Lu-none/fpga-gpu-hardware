@@ -3,6 +3,8 @@ CC ?= cc
 VERILATOR ?= verilator
 JOBS ?= 2
 OPENCL_MAX_CYCLES ?= 100000
+# rtl/top.sv clocks GPC from XDMA axi_aclk (125 MHz in xdma_0.xci).
+GPC_CLOCK_HZ ?= 125000000
 TRACE ?= 1
 FPGAGPU_CLANG ?= ../../fpga-gpu-compiler/scripts/fpgagpu-clang
 BUILD := build
@@ -29,7 +31,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 .PHONY: check gpc-sim lint clean
 .DELETE_ON_ERROR:
 
-export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES TRACE BUILD FPGAGPU_CLANG
+export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
 check: gpc-sim
 	./run_sim.sh $(TESTS)

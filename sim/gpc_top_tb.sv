@@ -2,7 +2,12 @@
 import gpu_pkg::*;
 module gpc_top_tb;
     reg clk = 0;
-    always #5 clk = ~clk;
+    real clock_hz = 125000000.0;
+    initial begin
+        if ($value$plusargs("clock_hz=%f", clock_hz)) begin end
+        if (clock_hz <= 0) $fatal(1, "clock_hz must be positive");
+        forever #(500000000.0 / clock_hz) clk = ~clk;
+    end
     reg rst_n = 0;
     axi_lite_if control();
     axi4_if #(.DATA_W(256)) vram();
@@ -28,6 +33,21 @@ module gpc_top_tb;
     always @(posedge clk) begin
         cycles <= cycles + 1;
         if (cycles >= max_cycles) $fatal(1, "GPC timeout busy=%b irq=%b reads=%0d writes=%0d", busy, irq, reads, writes);
+    end
+    // Timestamp the actual launch consumption edge and IRQ assertion, rather
+    // than AXI-Lite polling or testbench setup/teardown time.
+    realtime launch_start_ns = 0.0;
+    real launch_to_irq_ns = 0.0;
+    integer launch_to_irq_cycles = 0;
+    integer execution_fd;
+    always @(posedge clk) begin
+        if (rst_n && dut.hw_trigger) launch_start_ns = $realtime;
+    end
+    always @(posedge irq) begin
+        launch_to_irq_cycles = int'(($realtime - launch_start_ns) * clock_hz / 1000000000.0);
+        launch_to_irq_ns = launch_to_irq_cycles * 1000000000.0 / clock_hz;
+        $display("GPC launch-to-IRQ: %0d cycles, %.3f ns (%.6f us) at %.3f MHz",
+                 launch_to_irq_cycles, launch_to_irq_ns, launch_to_irq_ns / 1000.0, clock_hz / 1000000.0);
     end
     // Drive at negedge, sample handshakes at posedge. Skew AW/W independently.
     task automatic lite_write(input reg [31:0] addr, data, input integer skew = 0);
@@ -126,7 +146,7 @@ module gpc_top_tb;
     task automatic check_counters;
         reg [31:0] saved;
         for (int c = 0; c < PERF_COUNT; c++) lite_read(32'h30 + 32'(c*4), counters[c]);
-        if (counters[PERF_CYCLE] == 0 || counters[PERF_INST_RETIRED] != 32'(observed_retired) ||
+        if (counters[PERF_CYCLE] == 0 || counters[PERF_CYCLE] != 32'(launch_to_irq_cycles) || counters[PERF_INST_RETIRED] != 32'(observed_retired) ||
             counters[PERF_WARP_ISSUE] != 32'(observed_issue) ||
             counters[PERF_WARP_ISSUE] != counters[PERF_INST_RETIRED] ||
             counters[PERF_WARP_DONE] != 32'(grid_x*grid_y)) $fatal(1, "Counter issue/retire/warp totals mismatch");
@@ -231,10 +251,6 @@ module gpc_top_tb;
         $fwrite(counter_fd, "axi_write_stall_cycles_count: %0d\n", counters[17]);
         $fwrite(counter_fd, "warp_done_count: %0d\n", counters[18]);
         $fclose(counter_fd);
-        counter_fd = $fopen("execution.txt", "w");
-        if (counter_fd == 0) $fatal(1, "Cannot open execution.txt");
-        $fwrite(counter_fd, "divergence_events: %0d\n", observed_divergence);
-        $fclose(counter_fd);
         lite_write(32'h08, 1);
         lite_write(32'h2c, 1);
         for (int c = 0; c < PERF_COUNT; c++) begin
@@ -242,6 +258,17 @@ module gpc_top_tb;
             if (status != 0) $fatal(1, "Manual counter clear failed index=%0d", c);
         end
 `endif
+        execution_fd = $fopen("execution.txt", "w");
+        if (execution_fd == 0) $fatal(1, "Cannot open execution.txt");
+`ifdef ENABLE_GPU_DEBUG
+        $fwrite(execution_fd, "divergence_events: %0d\n", observed_divergence);
+`endif
+        $fwrite(execution_fd, "clock_hz: %.0f\n", clock_hz);
+        $fwrite(execution_fd, "clock_period_ns: %.6f\n", 1000000000.0 / clock_hz);
+        $fwrite(execution_fd, "launch_to_irq_cycles: %0d\n", launch_to_irq_cycles);
+        $fwrite(execution_fd, "launch_to_irq_time_ns: %.3f\n", launch_to_irq_ns);
+        $fwrite(execution_fd, "launch_to_irq_time_us: %.6f\n", launch_to_irq_ns / 1000.0);
+        $fclose(execution_fd);
         memory.dump(dump_path);
         $display("PASS GPC grid=%0dx%0d block=%0dx%0d instructions=%0d AXI reads=%0d writes=%0d cycles=%0d",
                  grid_x, grid_y, block_x, block_y, count, reads, writes, cycles);
