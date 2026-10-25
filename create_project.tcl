@@ -54,6 +54,9 @@ foreach name {axi_dwidth_converter_0 axi_clock_converter_0 axi_crossbar_0
 report_ip_status
 # Deliberately do not auto-upgrade IPs; version changes require review.
 generate_target all [get_ips]
-create_ip_run [get_ips]
+# create_ip_run accepts only one IP per invocation.
+foreach ip [get_ips] {
+    create_ip_run $ip
+}
 update_compile_order -fileset sources_1
 puts "Project created: [file join $project_dir fpga-gpu.xpr]"
