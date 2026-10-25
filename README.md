@@ -19,6 +19,16 @@ write_bd_tcl -force build_bd.tcl
 write_project_tcl -force recreate_project.tcl
 ```
 
+Reproducible Vivado project
+
+```bash
+# From this directory; creates build/vivado/fpga-gpu.xpr (does not run synthesis).
+vivado -mode gui -source create_project.tcl
+# Batch implementation, then optional bitstream:
+vivado -mode batch -source implement.tcl
+vivado -mode batch -source write_bitstream.tcl
+```
+
 ## verilog attributes
 
 ```verilog
