@@ -126,3 +126,6 @@ impl_*/
 # Keep simulation C sources
 !/sim/*.c
 !/sim/*.h
+
+/build/
+*.xpr
