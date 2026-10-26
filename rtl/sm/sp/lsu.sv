@@ -106,7 +106,6 @@ module lsu (
             active_rd <= '0;
             lane1_addr <= '0;
             lane1_wdata <= '0;
-            lane0_rdata <= '0;
             fifo_wr_ptr <= '0;
             fifo_rd_ptr <= '0;
             fifo_count <= '0;
@@ -118,7 +117,6 @@ module lsu (
             wb.valid <= 1'b0;
             wb.warp_id <= '0;
             wb.rd <= '0;
-            wb.data <= '0;
             wb.mask <= '0;
             ctx_wb.valid <= 1'b0;
             ctx_wb.warp_id <= '0;
@@ -201,8 +199,6 @@ module lsu (
                     // context write-back is emitted.
                     if (response_fire) begin
                         if (active_lane1_pending) begin
-                            if (active_is_load && active_rd != 5'd0)
-                                lane0_rdata <= active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0];
 
                             l1_req_valid <= 1'b1;
                             l1_req_addr <= lane1_addr;
@@ -218,11 +214,6 @@ module lsu (
                                 wb.warp_id <= active_warp_id;
                                 wb.rd <= active_rd;
                                 wb.mask <= active_mask;
-                                if (active_is_uniform)
-                                    wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]} :
-                                                               {l1_rsp_rdata[31:0], l1_rsp_rdata[31:0]};
-                                else
-                                    wb.data <= {active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0], lane0_rdata};
                             end
 
                             ctx_wb.valid <= 1'b1;
@@ -235,6 +226,21 @@ module lsu (
 
                 default: state <= ST_IDLE;
             endcase
+        end
+    end
+
+    // Payload registers need no reset. A divergent load captures lane 0 before
+    // completing lane 1; wb.data is meaningful only when reset-cleared wb.valid
+    // is asserted. Keep reset on the FSM, queue state and interface valids.
+    always @(posedge clk) begin
+        if (state == ST_WAIT && response_fire && active_is_load && active_rd != 5'd0) begin
+            if (active_lane1_pending)
+                lane0_rdata <= active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0];
+            else if (active_is_uniform)
+                wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]} :
+                                            {l1_rsp_rdata[31:0], l1_rsp_rdata[31:0]};
+            else
+                wb.data <= {active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0], lane0_rdata};
         end
     end
 
