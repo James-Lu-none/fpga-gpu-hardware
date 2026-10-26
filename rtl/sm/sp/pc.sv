@@ -44,6 +44,27 @@ module pc (
         end
     end
 
+    // Align context retirement and NZP with the two-cycle ALU pipeline.
+    reg [0:0] op_valid_q;
+    reg [7:0] op_opcode_q;
+    reg [3:0] op_warp_id_q;
+    reg [4:0] op_rd_q;
+    reg [31:0] op_imm_q;
+    reg [31:0] op_active_mask_q;
+    reg [11:0] op_pc_q;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) op_valid_q <= 0;
+        else op_valid_q <= op.valid;
+    end
+    always @(posedge clk) begin
+        op_opcode_q <= op.opcode;
+        op_warp_id_q <= op.warp_id;
+        op_rd_q <= op.rd;
+        op_imm_q <= op.imm;
+        op_active_mask_q <= op.active_mask;
+        op_pc_q <= op.pc;
+    end
+
     // Execution Stage 1: Pipeline Registers for Operand Data
     reg ex1_valid;
     reg [7:0] ex1_opcode;
@@ -63,13 +84,13 @@ module pc (
             ex1_active_mask <= 32'd0;
             ex1_pc <= 12'd0;
         end else begin
-            ex1_valid <= op.valid;
-            ex1_opcode <= op.opcode;
-            ex1_warp_id <= op.warp_id;
-            ex1_rd <= op.rd;
-            ex1_imm <= op.imm;
-            ex1_active_mask <= op.active_mask;
-            ex1_pc <= op.pc;
+            ex1_valid <= op_valid_q;
+            ex1_opcode <= op_opcode_q;
+            ex1_warp_id <= op_warp_id_q;
+            ex1_rd <= op_rd_q;
+            ex1_imm <= op_imm_q;
+            ex1_active_mask <= op_active_mask_q;
+            ex1_pc <= op_pc_q;
         end
     end
 

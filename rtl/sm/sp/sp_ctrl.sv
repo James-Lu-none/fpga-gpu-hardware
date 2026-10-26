@@ -135,6 +135,21 @@ module sp_ctrl (
     // Warp-level EX1 Stage Registers
     reg [7:0] ex1_opcode;
 
+    // First execution stage; exported ex1_* now denotes the aligned second
+    // execution stage consumed by the common writeback/PC logic.
+    reg mul_align_valid;
+    reg [7:0] mul_align_opcode;
+    reg [$clog2(MAX_WARPS)-1:0] mul_align_warp_id;
+    reg [4:0] mul_align_rd;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) mul_align_valid <= 0;
+        else mul_align_valid <= op.valid;
+    end
+    always @(posedge clk) begin
+        mul_align_opcode <= op.opcode;
+        mul_align_warp_id <= op.warp_id;
+        mul_align_rd <= op.rd;
+    end
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ex1_valid   <= 1'b0;
@@ -142,10 +157,10 @@ module sp_ctrl (
             ex1_warp_id <= '0;
             ex1_rd      <= 5'd0;
         end else begin
-            ex1_valid   <= op.valid;
-            ex1_opcode  <= op.opcode;
-            ex1_warp_id <= op.warp_id;
-            ex1_rd      <= op.rd;
+            ex1_valid   <= mul_align_valid;
+            ex1_opcode  <= mul_align_opcode;
+            ex1_warp_id <= mul_align_warp_id;
+            ex1_rd      <= mul_align_rd;
         end
     end
 

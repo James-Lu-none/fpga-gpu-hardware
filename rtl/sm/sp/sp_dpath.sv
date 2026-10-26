@@ -48,10 +48,14 @@ module sp_dpath (
         .wb (wb)
     );
 
-    // EX1 registers remain in the datapath, preserving arithmetic/DSP timing.
+    // Two execution stages: partial products, then low-32-bit accumulation.
+    // Other ALU operations are delayed to the same completion cycle.
     reg [31:0] ex1_add [0:NUM_LANES-1];
     reg [31:0] ex1_sub [0:NUM_LANES-1];
-    reg [31:0] ex1_mul [0:NUM_LANES-1];
+    wire [31:0] ex2_mul [0:NUM_LANES-1];
+    reg [31:0] ex2_add [0:NUM_LANES-1], ex2_sub [0:NUM_LANES-1], ex2_special [0:NUM_LANES-1];
+    reg [2:0] ex2_fn;
+    reg [31:0] ex2_mask;
     reg [31:0] ex1_special [0:NUM_LANES-1];
     reg [2:0] ex1_fn;
     reg [31:0] ex1_mask;
@@ -60,9 +64,13 @@ module sp_dpath (
         if (!rst_n) begin
             ex1_fn <= 3'd3;
             ex1_mask <= 32'd0;
+            ex2_fn <= 3'd3;
+            ex2_mask <= 0;
         end else begin
             ex1_fn <= alu_fn;
             ex1_mask <= op.active_mask;
+            ex2_fn <= ex1_fn;
+            ex2_mask <= ex1_mask;
         end
     end
     for (genvar k = 0; k < NUM_LANES; k = k + 1) begin : gen_alu_lanes
@@ -70,10 +78,10 @@ module sp_dpath (
         wire [31:0] rs2 = op.rs2_data[k*32 +: 32];
         // Only ADDI uses an immediate. Keep opcode-controlled muxing off MUL.
         wire [31:0] add_b = op.is_imm ? op.imm : rs2;
-        wire [31:0] add_result, sub_result, mul_result;
+        wire [31:0] add_result, sub_result;
         alu_int32 u_add (.fn(3'd0), .a(a), .b(add_b), .result(add_result), .nzp());
         alu_int32 u_sub (.fn(3'd1), .a(a), .b(rs2), .result(sub_result), .nzp());
-        alu_int32 u_mul (.fn(3'd2), .a(a), .b(rs2), .result(mul_result), .nzp());
+        alu_int32_mul u_mul (.clk(clk), .a(a), .b(rs2), .result(ex2_mul[k]));
         reg [31:0] special;
         always @(*) begin
             special = 32'd0;
@@ -87,17 +95,19 @@ module sp_dpath (
                 endcase
             end
         end
-        // Payload is consumed only with the reset-cleared EX1 valid signal.
+        // Payload is consumed only with the reset-cleared, aligned valid signal.
         // No reset on arithmetic data: reduce reset fanout and permit DSP registers.
         always @(posedge clk) begin
             ex1_add[k] <= add_result;
             ex1_sub[k] <= sub_result;
-            ex1_mul[k] <= mul_result;
+            ex2_add[k] <= ex1_add[k];
+            ex2_sub[k] <= ex1_sub[k];
+            ex2_special[k] <= ex1_special[k];
             ex1_special[k] <= special;
         end
-        assign lane_result[k] = ex1_fn == 3'd0 ? ex1_add[k] :
-                                ex1_fn == 3'd1 ? ex1_sub[k] :
-                                ex1_fn == 3'd2 ? ex1_mul[k] : ex1_special[k];
+        assign lane_result[k] = ex2_fn == 3'd0 ? ex2_add[k] :
+                                ex2_fn == 3'd1 ? ex2_sub[k] :
+                                ex2_fn == 3'd2 ? ex2_mul[k] : ex2_special[k];
         assign lane_nzp[k] = {lane_result[k][31], lane_result[k] == 0,
                              !lane_result[k][31] && lane_result[k] != 0};
     end
@@ -115,7 +125,7 @@ module sp_dpath (
                 alu_wb.valid   <= 1'b1;
                 alu_wb.warp_id <= ex1_warp_id;
                 alu_wb.rd      <= ex1_rd;
-                alu_wb.mask    <= ex1_mask;
+                alu_wb.mask    <= ex2_mask;
                 for (int k = 0; k < NUM_LANES; k = k + 1) begin
                     alu_wb.data[k*32 +: 32] <= lane_result[k];
                 end
