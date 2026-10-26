@@ -67,11 +67,13 @@ module sp_dpath (
     end
     for (genvar k = 0; k < NUM_LANES; k = k + 1) begin : gen_alu_lanes
         wire [31:0] a = op.rs1_data[k*32 +: 32];
-        wire [31:0] b = op.is_imm ? op.imm : op.rs2_data[k*32 +: 32];
+        wire [31:0] rs2 = op.rs2_data[k*32 +: 32];
+        // Only ADDI uses an immediate. Keep opcode-controlled muxing off MUL.
+        wire [31:0] add_b = op.is_imm ? op.imm : rs2;
         wire [31:0] add_result, sub_result, mul_result;
-        alu_int32 u_add (.fn(3'd0), .a(a), .b(b), .result(add_result), .nzp());
-        alu_int32 u_sub (.fn(3'd1), .a(a), .b(b), .result(sub_result), .nzp());
-        alu_int32 u_mul (.fn(3'd2), .a(a), .b(b), .result(mul_result), .nzp());
+        alu_int32 u_add (.fn(3'd0), .a(a), .b(add_b), .result(add_result), .nzp());
+        alu_int32 u_sub (.fn(3'd1), .a(a), .b(rs2), .result(sub_result), .nzp());
+        alu_int32 u_mul (.fn(3'd2), .a(a), .b(rs2), .result(mul_result), .nzp());
         reg [31:0] special;
         always @(*) begin
             special = 32'd0;
