@@ -23,7 +23,8 @@ module gpc_top #(
 );
 
     // Reset Pipeline (Level 1)
-    (* ASYNC_REG = "TRUE" *) reg gpc_rst_n_reg;
+    // Reset distribution stage, not a CDC synchronizer. Allow driver replication.
+    reg gpc_rst_n_reg;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) gpc_rst_n_reg <= 1'b0;
         else        gpc_rst_n_reg <= 1'b1;

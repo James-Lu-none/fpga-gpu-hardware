@@ -33,7 +33,8 @@ module sub_partition (
 );
 
     // Reset Pipeline (Level 3)
-    (* ASYNC_REG = "TRUE" *) reg core_rst_n_reg;
+    // Reset distribution stage, not a CDC synchronizer. Allow driver replication.
+    reg core_rst_n_reg;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) core_rst_n_reg <= 1'b0;
         else        core_rst_n_reg <= 1'b1;

@@ -45,7 +45,8 @@ module streaming_multiprocessor #(
 );
 
     // Reset Pipeline (Level 2)
-    (* ASYNC_REG = "TRUE" *) reg sm_rst_n_reg;
+    // Reset distribution stage, not a CDC synchronizer. Allow driver replication.
+    reg sm_rst_n_reg;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) sm_rst_n_reg <= 1'b0;
         else        sm_rst_n_reg <= 1'b1;
