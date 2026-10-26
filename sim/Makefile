@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: gpc-sim
+check: lsu-reset-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -48,3 +48,11 @@ $(BUILD)/gpc/Vgpc_top_tb: gpc_top_tb.sv axi_vram_model.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)
 	$(VERILATOR) $(FLAGS) --top-module gpc_top_tb --Mdir $(BUILD)/gpc $(GPC_SOURCES) axi_vram_model.sv gpc_top_tb.sv > $(BUILD)/gpc_compile.log 2>&1 || { cat $(BUILD)/gpc_compile.log; exit 1; }
 
+
+.PHONY: lsu-reset-check
+lsu-reset-check: $(BUILD)/lsu-reset/Vlsu_reset_tb
+	./$(BUILD)/lsu-reset/Vlsu_reset_tb
+
+$(BUILD)/lsu-reset/Vlsu_reset_tb: lsu_reset_tb.sv $(GPC_SOURCES)
+	mkdir -p $(BUILD)/lsu-reset
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
