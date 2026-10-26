@@ -85,18 +85,13 @@ module sp_dpath (
                 endcase
             end
         end
-        always @(posedge clk or negedge rst_n) begin
-            if (!rst_n) begin
-                ex1_add[k] <= 0;
-                ex1_sub[k] <= 0;
-                ex1_mul[k] <= 0;
-                ex1_special[k] <= 0;
-            end else begin
-                ex1_add[k] <= add_result;
-                ex1_sub[k] <= sub_result;
-                ex1_mul[k] <= mul_result;
-                ex1_special[k] <= special;
-            end
+        // Payload is consumed only with the reset-cleared EX1 valid signal.
+        // No reset on arithmetic data: reduce reset fanout and permit DSP registers.
+        always @(posedge clk) begin
+            ex1_add[k] <= add_result;
+            ex1_sub[k] <= sub_result;
+            ex1_mul[k] <= mul_result;
+            ex1_special[k] <= special;
         end
         assign lane_result[k] = ex1_fn == 3'd0 ? ex1_add[k] :
                                 ex1_fn == 3'd1 ? ex1_sub[k] :
