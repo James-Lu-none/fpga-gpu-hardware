@@ -3,7 +3,7 @@ set hardware_root [file dirname [file normalize [info script]]]
 set output [file join $hardware_root build output]
 if {[info exists ::env(CI_OUTPUT_DIR)]} { set output [file normalize $::env(CI_OUTPUT_DIR)] }
 file mkdir $output
-set jobs 4
+set jobs [string trim [exec nproc]]
 if {[info exists ::env(VIVADO_JOBS)]} { set jobs $::env(VIVADO_JOBS) }
 if {![string is integer -strict $jobs] || $jobs < 1} { error "Invalid VIVADO_JOBS" }
 set hardware_root [file dirname [file normalize [info script]]]

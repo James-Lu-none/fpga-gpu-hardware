@@ -1,3 +1,6 @@
+# Vivado 2026.1 supports at most eight threads per process.
+set cpu_count [string trim [exec nproc]]
+set_param general.maxThreads [expr {min(8, $cpu_count)}]
 # Shared project recipe: source in the GUI Tcl console or use -source in batch.
 set hardware_root [file dirname [file normalize [info script]]]
 set project_dir [file join $hardware_root build vivado]
