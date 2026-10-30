@@ -6,6 +6,7 @@ if {![file isfile $bitstream]} { error "Bitstream file missing: $bitstream" }
 if {[file size $bitstream] <= 0 || [file size $bitstream] > 16777216} {
     error "Bitstream must fit the AX7A200B 128-Mbit (16-MiB) configuration memory"
 }
+set_param labtools.enable_cs_server false
 open_hw_manager
 try {
     # Hardware Manager launches/connects to the local hw_server.
