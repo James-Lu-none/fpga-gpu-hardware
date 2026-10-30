@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: lsu-reset-check gpc-sim
+check: lsu-reset-check cache-store-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -56,3 +56,11 @@ lsu-reset-check: $(BUILD)/lsu-reset/Vlsu_reset_tb
 $(BUILD)/lsu-reset/Vlsu_reset_tb: lsu_reset_tb.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)/lsu-reset
 	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
+
+.PHONY: cache-store-check
+cache-store-check: $(BUILD)/cache-store/Vcache_store_tb
+	./$(BUILD)/cache-store/Vcache_store_tb
+
+$(BUILD)/cache-store/Vcache_store_tb: cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_if.sv $(RTL)/gpu_pkg.sv
+	mkdir -p $(BUILD)/cache-store
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/gpu_pkg.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
