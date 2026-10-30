@@ -69,7 +69,9 @@ module unified_cache #(
             data_dout <= data_ram[core_index];
             tag_dout <= tag_ram[core_index];
         end
-        if (memory_rsp_fire) begin
+        // Only reads return a cache line. A store acknowledgement has no
+        // valid read payload and must leave the written line invalid.
+        if (memory_rsp_fire && !req_we_q) begin
             data_ram[req_index_q] <= memory.rsp_rdata;
             tag_ram[req_index_q] <= req_tag_q;
         end
@@ -135,7 +137,7 @@ module unified_cache #(
 
                 ST_WAIT_MEM: begin
                     if (memory.rsp_valid && memory.rsp_ready) begin
-                        valid_ram[req_index_q] <= 1'b1;
+                        valid_ram[req_index_q] <= !req_we_q;
                         core.rsp_valid <= 1'b1;
                         core.rsp_rdata <= memory.rsp_rdata;
                         state <= ST_IDLE;
