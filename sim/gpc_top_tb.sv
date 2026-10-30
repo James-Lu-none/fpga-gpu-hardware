@@ -109,6 +109,18 @@ module gpc_top_tb;
         if (readback !== data) $fatal(1, "Register readback addr=%h got=%h expected=%h", addr, readback, data);
     endtask
 `ifdef ENABLE_GPU_DEBUG
+    task automatic check_axi_snapshot;
+        reg [31:0] value;
+        lite_read(32'h80, value);
+        if (value != 15) $fatal(1, "Missing first AXI handshakes: %h", value);
+        lite_read(32'h84, value);
+        if (value != 0) $fatal(1, "First GPU read was not the kernarg line: %h", value);
+        for (int word_idx = 0; word_idx < 8; word_idx++) begin
+            lite_read(32'h88 + 32'(word_idx*4), value);
+            if (value !== memory.memory[word_idx/2][(word_idx%2)*32 +: 32])
+                $fatal(1, "AXI read snapshot mismatch word %0d: %h", word_idx, value);
+        end
+    endtask
     reg [31:0] counters [0:PERF_COUNT-1];
     reg [31:0] first_retired;
     integer counter_fd;
@@ -223,11 +235,13 @@ module gpc_top_tb;
         if (status != 0 || irq) $fatal(1, "INT_ACK did not clear completion");
 `ifdef ENABLE_GPU_DEBUG
         check_counters();
+        check_axi_snapshot();
         first_retired = counters[PERF_INST_RETIRED];
         // A second launch must reset the bank rather than accumulate both runs.
         lite_write(32'h00, 1);
         do lite_read(32'h04, status); while (!status[0]);
         check_counters();
+        check_axi_snapshot();
         if (counters[PERF_INST_RETIRED] != first_retired) $fatal(1, "Launch did not reset counters");
         counter_fd = $fopen("counters.txt", "w");
         if (counter_fd == 0) $fatal(1, "Cannot open counters.txt");

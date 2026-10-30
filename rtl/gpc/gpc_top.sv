@@ -81,7 +81,14 @@ module gpc_top #(
         .grid_done_status (grid_done_status),
         .completion_irq   (gpu_completion_irq)
 `ifdef ENABLE_GPU_DEBUG
-        , .perf_clear(perf_clear), .perf_increments(perf_increments)
+        , .perf_clear(perf_clear), .perf_increments(perf_increments),
+        .debug_ar_fire(m_axi_gmem.arvalid && m_axi_gmem.arready),
+        .debug_r_fire(m_axi_gmem.rvalid && m_axi_gmem.rready),
+        .debug_aw_fire(m_axi_gmem.awvalid && m_axi_gmem.awready),
+        .debug_w_fire(m_axi_gmem.wvalid && m_axi_gmem.wready),
+        .debug_ar_addr(m_axi_gmem.araddr), .debug_aw_addr(m_axi_gmem.awaddr),
+        .debug_rdata(m_axi_gmem.rdata), .debug_wdata(m_axi_gmem.wdata[63:0]),
+        .debug_wstrb(m_axi_gmem.wstrb)
 `endif
     );
 

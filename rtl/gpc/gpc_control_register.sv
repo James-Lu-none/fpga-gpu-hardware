@@ -33,6 +33,10 @@ module gpc_control_register (
     output wire       completion_irq
 `ifdef ENABLE_GPU_DEBUG
     , input wire [31:0] perf_increments [0:gpu_pkg::PERF_COUNT-1],
+    input wire debug_ar_fire, debug_r_fire, debug_aw_fire, debug_w_fire,
+    input wire [31:0] debug_ar_addr, debug_aw_addr, debug_wstrb,
+    input wire [255:0] debug_rdata,
+    input wire [63:0] debug_wdata,
     output wire perf_clear
 `endif
 );
@@ -198,6 +202,9 @@ module gpc_control_register (
                     if (s_axi_lite.araddr[11:0] >= 12'h030 &&
                         s_axi_lite.araddr[11:0] < 12'h030 + gpu_pkg::PERF_COUNT*4 && s_axi_lite.araddr[1:0] == 0)
                         axi_rdata <= perf_counters[$clog2(gpu_pkg::PERF_COUNT)'((s_axi_lite.araddr[11:0] - 12'h030) >> 2)];
+                    else if (s_axi_lite.araddr[11:0] >= 12'h088 &&
+                             s_axi_lite.araddr[11:0] < 12'h0A8 && s_axi_lite.araddr[1:0] == 0)
+                        axi_rdata <= first_rdata[8'(s_axi_lite.araddr[11:0] - 12'h088)*8 +: 32];
                     else
 `endif
                     case (s_axi_lite.araddr[7:0])
@@ -208,6 +215,14 @@ module gpc_control_register (
                         8'h18:   axi_rdata <= {16'd0, block_dim_y};
                         8'h20:   axi_rdata <= src_addr;
                         8'h24:   axi_rdata <= dst_addr;
+`ifdef ENABLE_GPU_DEBUG
+                        8'h80:   axi_rdata <= {28'd0, first_axi_seen};
+                        8'h84:   axi_rdata <= first_araddr;
+                        8'hA8:   axi_rdata <= first_awaddr;
+                        8'hAC:   axi_rdata <= first_wstrb;
+                        8'hB0:   axi_rdata <= first_wdata[31:0];
+                        8'hB4:   axi_rdata <= first_wdata[63:32];
+`endif
                         default: axi_rdata <= 32'd0;
                     endcase
                 end else begin
@@ -220,6 +235,31 @@ module gpc_control_register (
     end
 
 `ifdef ENABLE_GPU_DEBUG
+    // First accepted DDR transaction of each launch. AW and W are independent.
+    reg [3:0] first_axi_seen;
+    reg [31:0] first_araddr, first_awaddr, first_wstrb;
+    reg [255:0] first_rdata;
+    reg [63:0] first_wdata;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) first_axi_seen <= 0;
+        else if (perf_clear) first_axi_seen <= 0;
+        else begin
+            if (debug_ar_fire) first_axi_seen[0] <= 1;
+            if (debug_r_fire) first_axi_seen[1] <= 1;
+            if (debug_aw_fire) first_axi_seen[2] <= 1;
+            if (debug_w_fire) first_axi_seen[3] <= 1;
+        end
+    end
+    // Payload is valid only when its corresponding seen bit is set.
+    always @(posedge clk) begin
+        if (debug_ar_fire && !first_axi_seen[0]) first_araddr <= debug_ar_addr;
+        if (debug_r_fire && !first_axi_seen[1]) first_rdata <= debug_rdata;
+        if (debug_aw_fire && !first_axi_seen[2]) first_awaddr <= debug_aw_addr;
+        if (debug_w_fire && !first_axi_seen[3]) begin
+            first_wstrb <= debug_wstrb;
+            first_wdata <= debug_wdata;
+        end
+    end
     reg [31:0] perf_counters [0:gpu_pkg::PERF_COUNT-1];
     reg perf_running;
     wire manual_clear = aw_done && w_done && !axi_bvalid &&
