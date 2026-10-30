@@ -115,7 +115,7 @@ module gpu_top (
         .pcpi_wait(1'b0),
         .pcpi_ready(1'b0),
         
-        .irq({31'd0, irq_reg}),
+        .irq({31'd0, rv_irq}),
         .eoi()
     );
 
