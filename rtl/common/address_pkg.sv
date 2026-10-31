@@ -24,6 +24,13 @@ package address_pkg;
     localparam logic [31:0] GPC_IRAM_OFFSET  = 32'h0000_1000;
     localparam logic [31:0] GPC_IRAM_BASE    = ADDR_BASE_GPC + GPC_IRAM_OFFSET;
 
+    // Read-only host alias within BAR0. Writes retain the unmapped address.
+    function automatic logic [31:0] host_bar0_read_address(input logic [31:0] addr);
+        if (addr[31:12] == 20'h00030)
+            return ADDR_BASE_GPC | {20'd0, addr[11:0]};
+        return addr;
+    endfunction
+
     // 3. Simple AXI-Lite UART
     // Base Address Region: 0x2000_XXXX
     localparam logic [31:0] ADDR_BASE_UART = 32'h2000_0000;

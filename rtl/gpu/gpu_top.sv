@@ -11,6 +11,7 @@ module gpu_top (
 
     // PCIe XDMA BAR0 AXI-Lite Slave Interface (Host Control)
     axi_lite_if.slave s_axi_lite,
+    input wire [3:0] system_status_async,
 
     // 256-bit AXI4-Full Master Interface (To Global Memory Crossbar)
     axi4_if.master m_axi_gmem,
@@ -138,7 +139,7 @@ module gpu_top (
         .s_axi_bresp   ({s_axi_lite.bresp,   rv_axi.bresp}),
         .s_axi_bvalid  ({s_axi_lite.bvalid,  rv_axi.bvalid}),
         .s_axi_bready  ({s_axi_lite.bready,  rv_axi.bready}),
-        .s_axi_araddr  ({s_axi_lite.araddr,  rv_axi.araddr}),
+        .s_axi_araddr  ({host_bar0_read_address(s_axi_lite.araddr), rv_axi.araddr}),
         .s_axi_arprot  ({s_axi_lite.arprot,  rv_axi.arprot}),
         .s_axi_arvalid ({s_axi_lite.arvalid, rv_axi.arvalid}),
         .s_axi_arready ({s_axi_lite.arready, rv_axi.arready}),
@@ -201,6 +202,14 @@ module gpu_top (
         .clk                (clk),
         .rst_n              (sys_rst_n),
         .s_axi_lite         (ctrl_axi),
+        .system_status_async(system_status_async),
+        .cp_trap            (internal_cp_trap),
+        .gpc_busy           (gpc_busy),
+        .gpu_completion_irq (gpu_completion_irq),
+        .host_irq_pending   (irq_pending),
+        .msi_enable         (msi_enable),
+        .ddr_read_error     (m_axi_gmem.rvalid && m_axi_gmem.rready && |m_axi_gmem.rresp),
+        .ddr_write_error    (m_axi_gmem.bvalid && m_axi_gmem.bready && |m_axi_gmem.bresp),
         .irq_out            (irq_reg),
         .cpu_soft_rst_n_out (cpu_soft_rst_n),
         .host_irq_notify    (host_irq_notify)
