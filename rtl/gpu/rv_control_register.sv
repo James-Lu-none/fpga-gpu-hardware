@@ -2,11 +2,13 @@
 
 import gpu_pkg::*;
 
-// Decodes Host (PCIe BAR0) and PicoRV32 Control & Status Registers (0x0002_0000 ~ 0x0002_0FFF)
+// Host/PicoRV32 control bank: 0x0002_0000 ~ 0x0002_00FF.
 // - 0x00: Host Doorbell / CPU IRQ (Bit 0: IRQ Assert)
 // - 0x04: PicoRV32 CPU Soft-Reset (Bit 0: Active-Low Reset - 0: In Reset, 1: Running)
 // - 0x08: Hardware Major Version (Read-Only)
 // - 0x0C: Hardware Minor Version (Read-Only)
+// - 0x10/0x14: Debug magic / map version
+// - 0x18: System status; 0x1C: sticky faults (write-one-to-clear)
 
 module rv_control_register (
     input wire        clk,
@@ -14,6 +16,9 @@ module rv_control_register (
 
     // AXI4-Lite Slave Interface (From Crossbar Port M01)
     axi_lite_if.slave s_axi_lite,
+    input wire [3:0] system_status_async,
+    input wire cp_trap, gpc_busy, gpu_completion_irq, host_irq_pending, msi_enable,
+    input wire ddr_read_error, ddr_write_error,
 
     // Control Outputs
     output reg        irq_out,
@@ -49,6 +54,39 @@ module rv_control_register (
     reg [31:0] latched_awaddr;
     reg [31:0] latched_wdata;
     reg [3:0]  latched_wstrb;
+
+    // Independent level indicators; this is not an atomic multi-bit CDC bus.
+    (* ASYNC_REG = "TRUE" *) reg [3:0] status_meta, status_sync;
+    reg [3:0] status_previous;
+    reg [5:0] sticky_faults;
+    wire [31:0] system_status = {
+        22'd0,
+        msi_enable, host_irq_pending,
+        gpu_completion_irq, gpc_busy, 
+        cp_trap, cpu_soft_rst_n_out,
+        status_sync
+    };
+    wire [5:0] fault_events = {
+        ddr_write_error, ddr_read_error, cp_trap,
+        status_previous[3] && !status_sync[3],
+        status_previous[1] && !status_sync[1],
+        status_previous[0] && !status_sync[0]
+    };
+    wire clear_faults = aw_done && w_done && !axi_bvalid && latched_awaddr[7:0] == 8'h1C && latched_wstrb[0];
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            status_meta <= 0;
+            status_sync <= 0;
+            status_previous <= 0;
+            sticky_faults <= 0;
+        end else begin
+            status_meta <= system_status_async;
+            status_sync <= status_meta;
+            status_previous <= status_sync;
+            // Newly observed faults win over simultaneous write-one-to-clear.
+            sticky_faults <= (sticky_faults & ~(clear_faults ? latched_wdata[5:0] : 6'd0)) | fault_events;
+        end
+    end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -98,10 +136,10 @@ module rv_control_register (
                 aw_done    <= 1'b0;
                 w_done     <= 1'b0;
 
-                case (latched_awaddr[5:0])
-                    6'h00: irq_out            <= latched_wdata[0];
-                    6'h04: cpu_soft_rst_n_out <= latched_wdata[0];
-                    6'h08: host_irq_notify    <= latched_wdata[0];
+                case (latched_awaddr[7:0])
+                    8'h00: irq_out            <= latched_wdata[0];
+                    8'h04: cpu_soft_rst_n_out <= latched_wdata[0];
+                    8'h08: host_irq_notify    <= latched_wdata[0];
                     default: ;
                 endcase
             end
@@ -133,11 +171,15 @@ module rv_control_register (
                 axi_rvalid <= 1'b1;
                 axi_rresp  <= 2'b00; // OKAY
 
-                case (s_axi_lite.araddr[5:0])
-                    6'h00:   axi_rdata <= {31'd0, irq_out};
-                    6'h04:   axi_rdata <= {31'd0, cpu_soft_rst_n_out};
-                    6'h08:   axi_rdata <= gpu_pkg::HW_VERSION_MAJOR;
-                    6'h0C:   axi_rdata <= gpu_pkg::HW_VERSION_MINOR;
+                case (s_axi_lite.araddr[7:0])
+                    8'h00:   axi_rdata <= {31'd0, irq_out};
+                    8'h04:   axi_rdata <= {31'd0, cpu_soft_rst_n_out};
+                    8'h08:   axi_rdata <= gpu_pkg::HW_VERSION_MAJOR;
+                    8'h0C:   axi_rdata <= gpu_pkg::HW_VERSION_MINOR;
+                    8'h10:   axi_rdata <= 32'h47505544; // "GPUD"
+                    8'h14:   axi_rdata <= 32'd1; // Debug register-map version
+                    8'h18:   axi_rdata <= system_status;
+                    8'h1C:   axi_rdata <= {26'd0, sticky_faults};
                     default: axi_rdata <= 32'd0;
                 endcase
             end else if (axi_rvalid && s_axi_lite.rready) begin

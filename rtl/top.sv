@@ -646,6 +646,7 @@ module top (
         .clk (axi_aclk),
         .rst_n (axi_aresetn),
         .s_axi_lite (xdma_rv_axil),
+        .system_status_async ({user_lnk_up, ui_clk_sync_rst, mig_mmcm_locked, mig_calib_done}),
         .m_axi_gmem (gpu_xbar_axi),
         .usr_irq_req (usr_irq_req),
         .usr_irq_ack (usr_irq_ack),
