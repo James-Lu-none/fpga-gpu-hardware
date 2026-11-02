@@ -95,6 +95,13 @@ module l2_memory_test (
     assign s_axi_lite.arready = rst_n && !s_axi_lite.rvalid;
     wire commit_write = aw_pending && w_pending && !s_axi_lite.bvalid;
     wire start = commit_write && awaddr == 8'h14 && wstrb[0] && wdata[0] && !running;
+    wire vrf_write = awaddr >= 8'h44 && awaddr <= 8'h5c && awaddr[1:0] == 0 && wstrb == 4'hf;
+    wire [31:0] vrf_read_data;
+    vrf_probe u_vrf_probe (
+        .clk(clk), .rst_n(rst_n), .write_enable(commit_write && !running && vrf_write),
+        .write_addr(awaddr), .write_data(wdata), .read_addr(s_axi_lite.araddr[7:0]),
+        .read_data(vrf_read_data)
+    );
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             aw_pending <= 0;
@@ -124,7 +131,7 @@ module l2_memory_test (
                 w_pending <= 0;
                 s_axi_lite.bvalid <= 1;
                 s_axi_lite.bresp <= (!running && (awaddr == 8'h14 ||
-                    (awaddr == 8'h24 && wstrb[0] && wdata < 6))) ? 2'b00 : 2'b10;
+                    (awaddr == 8'h24 && wstrb[0] && wdata < 6) || vrf_write)) ? 2'b00 : 2'b10;
                 if (awaddr == 8'h24 && !running && wstrb[0] && wdata < 6) path <= wdata[2:0];
             end
             if (s_axi_lite.rvalid && s_axi_lite.rready) s_axi_lite.rvalid <= 0;
@@ -144,7 +151,7 @@ module l2_memory_test (
                     8'h34: s_axi_lite.rdata <= first_l2_addr;
                     8'h38: s_axi_lite.rdata <= first_axi_addr;
                     8'h3c: s_axi_lite.rdata <= {29'd0, seen};
-                    default: s_axi_lite.rdata <= 0;
+                    default: s_axi_lite.rdata <= vrf_read_data;
                 endcase
             end
         end

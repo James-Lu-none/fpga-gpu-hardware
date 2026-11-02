@@ -109,6 +109,38 @@ module l2_memory_tb;
         if (value != 'h3f) $fatal(1, "Missing path capabilities");
         for (int round = 0; round < 2; round++)
             for (int path = 0; path < 6; path++) seed_and_check(round*6 + path + 1, path);
+        // Exercise the actual AXI-Lite route into the VRF probe.
+        read_csr('h20040, value);
+        if (value != 'h56524631) $fatal(1, "Missing VRF probe");
+        read_csr('h20080, value);
+        if (value != 'h20820) $fatal(1, "Unexpected VRF geometry");
+        write_csr('h20048, 1, 0); // warp 0, R1
+        write_csr('h2004c, 3, 0);
+        write_csr('h20050, 'h1000, 0);
+        write_csr('h20054, 'h12345678, 1);
+        write_csr('h20044, 1, 0);
+        read_csr('h20044, value);
+        if (value != 1) $fatal(1, "VRF write not acknowledged");
+        write_csr('h20058, (1 << 5) | 1, 0);
+        write_csr('h2005c, 'habc12345, 1);
+        write_csr('h20044, 2, 0);
+        read_csr('h20060, value);
+        if (value != 1) $fatal(1, "Missing VRF snapshot");
+        read_csr('h20064, value);
+        if (value != 'h1000) $fatal(1, "Incorrect VRF rs1 lane 0");
+        read_csr('h20068, value);
+        if (value != 'h12345678) $fatal(1, "Incorrect VRF rs1 lane 1");
+        read_csr('h2006c, value);
+        if (value != 'h1000) $fatal(1, "Incorrect VRF rs2 lane 0");
+        read_csr('h20070, value);
+        if (value != 'h12345678) $fatal(1, "Incorrect VRF rs2 lane 1");
+        read_csr('h20074, value);
+        if (value != 'h345) $fatal(1, "Incorrect VRF PC/warp snapshot");
+        read_csr('h20078, value);
+        if (value != 'habc12345) $fatal(1, "Incorrect VRF tag snapshot");
+        read_csr('h2007c, value);
+        if (value != 'ha10003) $fatal(1, "Incorrect VRF flags snapshot");
+        $display("PASS: AXI-Lite VRF write, read, counters and operand snapshots");
         write_csr('h20024, 0, 0);
         force memory_bus.bresp = 2'b10;
         write_csr('h20014, 1, 0);

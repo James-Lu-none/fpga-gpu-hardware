@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: l2-memory-check lsu-reset-check cache-store-check gpc-sim
+check: vrf-check l2-memory-check lsu-reset-check cache-store-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -69,8 +69,17 @@ $(BUILD)/cache-store/Vcache_store_tb: cache_store_tb.sv $(RTL)/common/unified_ca
 l2-memory-check: $(BUILD)/l2-memory/Vl2_memory_tb
 	./$(BUILD)/l2-memory/Vl2_memory_tb +memory=$(BUILD)/l2-memory/initial.hex
 
-L2_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/l1_cache.sv $(RTL)/sm/sp/lsu.sv $(RTL)/common/axi_if.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv $(RTL)/gpc/l2_cache.sv $(RTL)/gpu/l2_memory_test.sv axi_vram_model.sv l2_memory_tb.sv
+L2_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/l1_cache.sv $(RTL)/sm/sp/lsu.sv $(RTL)/common/axi_if.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv $(RTL)/gpc/l2_cache.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv $(RTL)/gpu/l2_memory_test.sv axi_vram_model.sv l2_memory_tb.sv
 $(BUILD)/l2-memory/Vl2_memory_tb: $(L2_TEST_SOURCES)
 	mkdir -p $(BUILD)/l2-memory
 	python3 -c 'from pathlib import Path; Path("$(BUILD)/l2-memory/initial.hex").write_text("a5a5a5a5a5a5a5a5\n" * 8192)'
 	$(VERILATOR) $(FLAGS) --top-module l2_memory_tb --Mdir $(BUILD)/l2-memory $(L2_TEST_SOURCES) > $(BUILD)/l2-memory/compile.log 2>&1 || { cat $(BUILD)/l2-memory/compile.log; exit 1; }
+
+.PHONY: vrf-check
+vrf-check: $(BUILD)/vrf/Vvector_regfile_tb
+	./$(BUILD)/vrf/Vvector_regfile_tb
+
+VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile.sv vector_regfile_tb.sv
+$(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
+	mkdir -p $(BUILD)/vrf
+	$(VERILATOR) $(FLAGS) --top-module vector_regfile_tb --Mdir $(BUILD)/vrf $(VRF_TEST_SOURCES) > $(BUILD)/vrf/compile.log 2>&1 || { cat $(BUILD)/vrf/compile.log; exit 1; }

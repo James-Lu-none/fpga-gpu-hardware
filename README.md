@@ -40,6 +40,14 @@ vivado -mode batch -source write_bitstream.tcl
 - `make -C sim l2-memory-check` checks all paths, lane masks, AXI backpressure, repeated runs, error responses and memory guards.
 - Use `gpu` for the normal design.
 
+## VRF diagnostic
+
+- The `l2` bitstream also includes `vrf_probe`, which drives the unmodified `vector_regfile` through write-back and fixed decode inputs.
+- BAR0 `0x20040` is magic `0x56524631`; `0x20044` accepts write/read command bits 0/1 and reads the completed-write counter.
+- `0x20048-0x2005C` configure write address/mask/data and decode address/tag. Write address is `(warp << 5) | rd`; decode address is `(warp << 10) | (rs2 << 5) | rs1`.
+- `0x20060` counts snapshots; `0x20064-0x20070` hold rs1/rs2 lane values; `0x20074-0x2007C` hold operand metadata. `0x20080` reports lanes/warps/registers in bytes 2/1/0.
+- `make -C sim vrf-check` checks back-to-back reads and two-cycle data/metadata alignment. `l2-memory-check` also verifies the AXI-Lite probe connection.
+
 ## verilog attributes
 
 ```verilog
