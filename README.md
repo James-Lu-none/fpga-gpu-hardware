@@ -29,14 +29,16 @@ vivado -mode batch -source implement.tcl
 vivado -mode batch -source write_bitstream.tcl
 ```
 
-## L2 memory diagnostic
+## Memory path diagnostic
 
-- Set `FPGAGPU_HARDWARE_MODE=l2` when running `implement.tcl` to replace GPC with a pattern writer and the production L2. PicoRV32 stays in reset.
-- Host triggers 128 full-line writes to DDR `0x1000-0x1FFF`; word `i` is `0x4C320000 ^ i`.
-- Test-only BAR0 registers: `0x20010` magic `0x4C325453`, `0x20014` start bit 0, `0x20018` status (busy bit 0, done bit 1, AXI error bit 2), `0x2001C` completed lines, `0x20020` run ID.
-- Done waits for all L2 responses. Each accepted start clears status and increments run ID.
-- `make -C sim l2-memory-check` checks AXI backpressure, repeated runs, error responses and memory guards.
-- Unset the mode or use `gpu` for the normal design.
+- Set `FPGAGPU_HARDWARE_MODE=l2` for a diagnostic bitstream without GPC/VRF; PicoRV32 stays in reset.
+- Runtime paths: `l2`, `l1`, `lsu-uniform`, `lsu-pair`, `lsu-lane0`, `lsu-lane1`. All use the production cache/LSU modules.
+- Each writes DDR `0x1000-0x1FFF`; word `i` is `0x4C320000 ^ i`. Inactive LSU lanes point into guard pages.
+- Test-only BAR0: `0x20010` magic `0x4C325453`, `0x20014` start, `0x20018` status (busy/done/AXI error bits 0/1/2), `0x2001C` completed requests, `0x20020` run ID.
+- `0x20024` selects path IDs 0-5 while idle; `0x20028` is the supported-path bitmask.
+- `0x20030`, `0x20034`, `0x20038` capture first accepted L1/L2/AXI write addresses; `0x2003C` holds their valid bits 0/1/2. Start clears snapshots.
+- `make -C sim l2-memory-check` checks all paths, lane masks, AXI backpressure, repeated runs, error responses and memory guards.
+- Use `gpu` for the normal design.
 
 ## verilog attributes
 
