@@ -69,7 +69,7 @@ $(BUILD)/cache-store/Vcache_store_tb: cache_store_tb.sv $(RTL)/common/unified_ca
 l2-memory-check: $(BUILD)/l2-memory/Vl2_memory_tb
 	./$(BUILD)/l2-memory/Vl2_memory_tb +memory=$(BUILD)/l2-memory/initial.hex
 
-L2_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/l1_cache.sv $(RTL)/sm/sp/lsu.sv $(RTL)/common/axi_if.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv $(RTL)/gpc/l2_cache.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv $(RTL)/gpu/l2_memory_test.sv axi_vram_model.sv l2_memory_tb.sv
+L2_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/l1_cache.sv $(RTL)/sm/sp/lsu.sv $(RTL)/common/axi_if.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv $(RTL)/gpc/l2_cache.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv $(RTL)/gpu/l2_memory_test.sv axi_vram_model.sv l2_memory_tb.sv
 $(BUILD)/l2-memory/Vl2_memory_tb: $(L2_TEST_SOURCES)
 	mkdir -p $(BUILD)/l2-memory
 	python3 -c 'from pathlib import Path; Path("$(BUILD)/l2-memory/initial.hex").write_text("a5a5a5a5a5a5a5a5\n" * 8192)'
@@ -79,7 +79,7 @@ $(BUILD)/l2-memory/Vl2_memory_tb: $(L2_TEST_SOURCES)
 vrf-check: $(BUILD)/vrf/Vvector_regfile_tb
 	./$(BUILD)/vrf/Vvector_regfile_tb
 
-VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile.sv vector_regfile_tb.sv
+VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv vector_regfile_tb.sv
 $(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
 	mkdir -p $(BUILD)/vrf
 	$(VERILATOR) $(FLAGS) --top-module vector_regfile_tb --Mdir $(BUILD)/vrf $(VRF_TEST_SOURCES) > $(BUILD)/vrf/compile.log 2>&1 || { cat $(BUILD)/vrf/compile.log; exit 1; }
@@ -88,7 +88,7 @@ $(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
 vrf-probe-check: $(BUILD)/vrf-probe/Vvrf_probe_tb
 	./$(BUILD)/vrf-probe/Vvrf_probe_tb
 
-VRF_PROBE_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv vrf_probe_tb.sv
+VRF_PROBE_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv vrf_probe_tb.sv
 $(BUILD)/vrf-probe/Vvrf_probe_tb: $(VRF_PROBE_SOURCES)
 	mkdir -p $(BUILD)/vrf-probe
 	$(VERILATOR) $(FLAGS) --top-module vrf_probe_tb --Mdir $(BUILD)/vrf-probe $(VRF_PROBE_SOURCES) > $(BUILD)/vrf-probe/compile.log 2>&1 || { cat $(BUILD)/vrf-probe/compile.log; exit 1; }

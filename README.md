@@ -46,6 +46,7 @@ vivado -mode batch -source write_bitstream.tcl
 - BAR0 `0x20040` is magic `0x56524631`; `0x20044` accepts write/read command bits 0/1 and reads the completed-write counter.
 - `0x20048-0x2005C` configure write address/mask/data and decode address/tag. Write address is `(warp << 5) | rd`; decode address is `(warp << 10) | (rs2 << 5) | rs1`.
 - `0x20060` counts snapshots; `0x20064-0x20070` hold rs1/rs2 lane values; `0x20074-0x2007C` hold operand metadata. `0x20080` reports lanes/warps/registers in bytes 2/1/0.
+- VRF uses an independent synchronous 1R1W RAM per lane/read port (`vector_regfile_ram.sv`), with shared write-back inputs and full 32-bit writes. BRAM-read plus operand latency remains two cycles.
 - VRF resets only valid; BRAM, address and metadata payloads use clock-only blocks. Implementation rejects VRF `Synth 8-7137` reset-inference warnings.
 - `0x20084` is internal-stage snapshot version 1. `0x20088` holds aligned rs1/rs2 addresses in bytes 0/1 and their R0-select flags in bits 16/17. `0x2008C-0x20098` hold raw rs1/rs2 BRAM values before the R0 mux; raw R0 contents are unspecified.
 - In `l2` mode, implementation exports the synthesized `vrf_probe` hierarchy with `write_verilog -cell -mode funcsim` and runs `vrf_probe_tb` using XSim before routing. Logs/netlist stay under `artifacts/vivado/vrf-netlist/`; failure stops bitstream generation.
