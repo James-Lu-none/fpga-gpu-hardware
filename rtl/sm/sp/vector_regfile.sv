@@ -42,7 +42,7 @@ module vector_regfile (
     wb_if.slave wb
 );
 
-    // Total registers = 16 warps * 32 regs = 512 entries
+    // One register entry per warp/register pair.
     localparam RAM_DEPTH = MAX_WARPS * NUM_REGS;
 
     // To get 2R1W from FPGA BRAMs, we duplicate the memory.
@@ -96,29 +96,28 @@ module vector_regfile (
         rs2_data_read <= ram_rs2[addr_rs2];
     end
 
-    // Pipeline Alignment:
-    // Since BRAM on FPGA has a 1-cycle read latency, we must delay all control 
-    // signals (opcode, pc, etc.) by 1 cycle using D-Flip-Flops (_q). 
-    // This ensures that when the BRAM outputs the register data on the next cycle, 
-    // the control signals arrive at the ALU at the exact same time.
+    // Only valid uses asynchronous reset. Mixing unreset payload registers
+    // into this block produces Vivado Synth 8-7137 set/reset-priority warnings.
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            decode_valid_q <= 1'b0;
-        end else begin
-            addr_rs1_q <= addr_rs1;
-            addr_rs2_q <= addr_rs2;
-            decode_valid_q <= decode.valid;
-            decode_warp_id_q <= decode.warp_id;
-            decode_pc_q <= decode.pc;
-            decode_active_mask_q <= decode.active_mask;
-            decode_opcode_q <= decode.opcode;
-            decode_rd_q <= decode.rd;
-            decode_imm_q <= decode.imm;
-            decode_is_imm_q <= decode.is_imm;
-            decode_block_idx_x_q <= decode.block_idx_x;
-            decode_block_idx_y_q <= decode.block_idx_y;
-            decode_thread_id_start_q <= decode.thread_id_start;
-        end
+        if (!rst_n) decode_valid_q <= 1'b0;
+        else decode_valid_q <= decode.valid;
+    end
+
+    // Match the synchronous BRAM read with one cycle of address/metadata.
+    // Payload may advance during reset; cleared valid prevents its use.
+    always @(posedge clk) begin
+        addr_rs1_q <= addr_rs1;
+        addr_rs2_q <= addr_rs2;
+        decode_warp_id_q <= decode.warp_id;
+        decode_pc_q <= decode.pc;
+        decode_active_mask_q <= decode.active_mask;
+        decode_opcode_q <= decode.opcode;
+        decode_rd_q <= decode.rd;
+        decode_imm_q <= decode.imm;
+        decode_is_imm_q <= decode.is_imm;
+        decode_block_idx_x_q <= decode.block_idx_x;
+        decode_block_idx_y_q <= decode.block_idx_y;
+        decode_thread_id_start_q <= decode.thread_id_start;
     end
 
     // Operand stage: isolate BRAM clock-to-output and R0 selection from

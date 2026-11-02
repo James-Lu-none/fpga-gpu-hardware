@@ -17,11 +17,14 @@ module vector_regfile_tb;
         logic [31:0] cycle;
     } expected_t;
     expected_t pending[$];
-    integer cycle = 0, checks = 0, issued = 0;
+    integer cycle = 0, checks = 0, issued = 0, cancelled = 0;
     always @(posedge clk) begin
         expected_t e;
         cycle = cycle + 1;
-        if (!rst_n) pending.delete();
+        if (!rst_n) begin
+            cancelled += pending.size();
+            pending.delete();
+        end
         else begin
             if (op.valid) begin
                 if (pending.size() == 0) $fatal(1, "Unexpected operand valid");
@@ -75,7 +78,7 @@ module vector_regfile_tb;
             end
         @(negedge clk); decode.valid = 0;
         repeat (4) @(negedge clk);
-        if (pending.size() != 0 || checks != issued) $fatal(1, "Missing VRF operands");
+        if (pending.size() != 0 || checks + cancelled != issued) $fatal(1, "Missing VRF operands");
     endtask
     initial begin
         wb.valid = 0; wb.warp_id = 0; wb.rd = 0; wb.mask = 0; wb.data = 0;
@@ -101,7 +104,24 @@ module vector_regfile_tb;
         end
         read_stream(1);
         read_stream(0);
-        $display("PASS: VRF %0d back-to-back operands; both ports, all warps/registers, masks, R0 and two-cycle metadata alignment", checks);
+        // Assert reset between clock edges with a decode in flight. Payload
+        // and RAM need no reset, but no pre-reset valid may escape afterward.
+        @(negedge clk); decode.valid = 1; decode.rs1 = 1; decode.rs2 = 0;
+        @(posedge clk); #1; rst_n = 0;
+        #1;
+        if (op.valid || dut.decode_valid_q) $fatal(1, "Asynchronous valid reset failed");
+        repeat (3) begin
+            @(negedge clk);
+            decode.rs1 = decode.rs1 + 1'b1;
+            decode.rs2 = decode.rs2 + 1'b1;
+            if (op.valid) $fatal(1, "Operand valid during reset");
+        end
+        decode.valid = 0;
+        rst_n = 1;
+        repeat (4) @(negedge clk);
+        read_stream(0); // The masked register contents must survive reset.
+        if (cancelled != 1) $fatal(1, "Unexpected number of flushed operands");
+        $display("PASS: VRF %0d back-to-back operands; ports, masks, R0, two-cycle alignment, asynchronous valid reset and RAM retention", checks);
         $finish;
     end
     initial begin

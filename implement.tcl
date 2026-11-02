@@ -14,6 +14,20 @@ reset_run synth_1
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} { error "Synthesis failed" }
+# The VRF hardware failure occurred with ambiguous reset inference warnings.
+# Stop before routing if this specific coding hazard returns.
+set synth_log [open [file join [get_property DIRECTORY [get_runs synth_1]] runme.log] r]
+set vrf_reset_warnings {}
+while {[gets $synth_log line] >= 0} {
+    if {[regexp {\[Synth 8-7137\].*(module vector_regfile|vector_regfile\.sv)} $line]} {
+        lappend vrf_reset_warnings $line
+    }
+}
+close $synth_log
+if {[llength $vrf_reset_warnings]} {
+    error "VRF reset inference is ambiguous:\n[join $vrf_reset_warnings \n]"
+}
+puts "PASS: VRF synthesis has no ambiguous reset warnings."
 reset_run impl_1
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1
