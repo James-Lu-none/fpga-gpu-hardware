@@ -37,6 +37,13 @@ foreach header $headers {
 }
 set_property include_dirs [lsort -unique $include_dirs] [get_filesets sources_1]
 set_property include_dirs [lsort -unique $include_dirs] [get_filesets sim_1]
+set hardware_mode gpu
+if {[info exists ::env(FPGAGPU_HARDWARE_MODE)]} { set hardware_mode $::env(FPGAGPU_HARDWARE_MODE) }
+if {$hardware_mode ni {gpu l2}} { error "Invalid FPGAGPU_HARDWARE_MODE: $hardware_mode" }
+if {$hardware_mode eq "l2"} {
+    set_property verilog_define {FPGAGPU_L2_TEST} [get_filesets sources_1]
+}
+puts "Hardware mode: $hardware_mode"
 set_property top top [get_filesets sources_1]
 set constraints [fpgagpu_sources::collect [file join $hardware_root constrs] {.xdc}]
 if {![llength $constraints]} { error "No constraints found" }

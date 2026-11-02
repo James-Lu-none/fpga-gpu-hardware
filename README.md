@@ -29,6 +29,15 @@ vivado -mode batch -source implement.tcl
 vivado -mode batch -source write_bitstream.tcl
 ```
 
+## L2 memory diagnostic
+
+- Set `FPGAGPU_HARDWARE_MODE=l2` when running `implement.tcl` to replace GPC with a pattern writer and the production L2. PicoRV32 stays in reset.
+- Host triggers 128 full-line writes to DDR `0x1000-0x1FFF`; word `i` is `0x4C320000 ^ i`.
+- Test-only BAR0 registers: `0x20010` magic `0x4C325453`, `0x20014` start bit 0, `0x20018` status (busy bit 0, done bit 1, AXI error bit 2), `0x2001C` completed lines, `0x20020` run ID.
+- Done waits for all L2 responses. Each accepted start clears status and increments run ID.
+- `make -C sim l2-memory-check` checks AXI backpressure, repeated runs, error responses and memory guards.
+- Unset the mode or use `gpu` for the normal design.
+
 ## verilog attributes
 
 ```verilog

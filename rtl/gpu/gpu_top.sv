@@ -197,6 +197,7 @@ module gpu_top (
     );
 
     // AXI Control Registers (Port M01)
+`ifndef FPGAGPU_L2_TEST
     rv_control_register u_ctrl_regs (
         .clk                (clk),
         .rst_n              (sys_rst_n),
@@ -205,6 +206,11 @@ module gpu_top (
         .cpu_soft_rst_n_out (cpu_soft_rst_n),
         .host_irq_notify    (host_irq_notify)
     );
+`else
+    assign irq_reg = 0;
+    assign host_irq_notify = 0;
+    assign cpu_soft_rst_n = 0; // No firmware executes in the L2 diagnostic bitstream.
+`endif
 
 
     wire [16:0] brama_addr;
@@ -282,6 +288,23 @@ module gpu_top (
                       (s_axi_lite.arvalid & s_axi_lite.arready);
 
     // 2. Graphics Processing Cluster (Compute Plane)
+`ifdef FPGAGPU_L2_TEST
+    l2_memory_test u_l2_test (
+        .clk(clk), .rst_n(sys_rst_n), .s_axi_lite(ctrl_axi),
+        .m_axi(m_axi_gmem), .busy(gpc_busy)
+    );
+    assign gpu_completion_irq = 0;
+    assign l2_act = m_axi_gmem.awvalid && m_axi_gmem.awready;
+    // The GPC address region is unused in this bitstream.
+    assign rv_gpu_axil.awready = 0;
+    assign rv_gpu_axil.wready = 0;
+    assign rv_gpu_axil.bvalid = 0;
+    assign rv_gpu_axil.bresp = 0;
+    assign rv_gpu_axil.arready = 0;
+    assign rv_gpu_axil.rvalid = 0;
+    assign rv_gpu_axil.rdata = 0;
+    assign rv_gpu_axil.rresp = 0;
+`else
     gpc_top u_gpc (
         .clk (clk),
         .rst_n (sys_rst_n),
@@ -292,4 +315,5 @@ module gpu_top (
         .gpu_completion_irq (gpu_completion_irq)
     );
 
+`endif
 endmodule

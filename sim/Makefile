@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: lsu-reset-check cache-store-check gpc-sim
+check: l2-memory-check lsu-reset-check cache-store-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -64,3 +64,13 @@ cache-store-check: $(BUILD)/cache-store/Vcache_store_tb
 $(BUILD)/cache-store/Vcache_store_tb: cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_if.sv $(RTL)/gpu_pkg.sv
 	mkdir -p $(BUILD)/cache-store
 	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/gpu_pkg.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
+
+.PHONY: l2-memory-check
+l2-memory-check: $(BUILD)/l2-memory/Vl2_memory_tb
+	./$(BUILD)/l2-memory/Vl2_memory_tb +memory=$(BUILD)/l2-memory/initial.hex
+
+L2_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/axi_if.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv $(RTL)/gpc/l2_cache.sv $(RTL)/gpu/l2_memory_test.sv axi_vram_model.sv l2_memory_tb.sv
+$(BUILD)/l2-memory/Vl2_memory_tb: $(L2_TEST_SOURCES)
+	mkdir -p $(BUILD)/l2-memory
+	python3 -c 'from pathlib import Path; Path("$(BUILD)/l2-memory/initial.hex").write_text("a5a5a5a5a5a5a5a5\n" * 8192)'
+	$(VERILATOR) $(FLAGS) --top-module l2_memory_tb --Mdir $(BUILD)/l2-memory $(L2_TEST_SOURCES) > $(BUILD)/l2-memory/compile.log 2>&1 || { cat $(BUILD)/l2-memory/compile.log; exit 1; }
