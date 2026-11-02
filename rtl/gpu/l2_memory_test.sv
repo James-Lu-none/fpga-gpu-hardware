@@ -97,7 +97,10 @@ module l2_memory_test (
     wire start = commit_write && awaddr == 8'h14 && wstrb[0] && wdata[0] && !running;
     wire vrf_write = awaddr >= 8'h44 && awaddr <= 8'h5c && awaddr[1:0] == 0 && wstrb == 4'hf;
     wire [31:0] vrf_read_data;
-    vrf_probe u_vrf_probe (
+    // Exported for post-synthesis simulation. Preserve this diagnostic
+    // boundary so cross-module optimization cannot change the flat port API.
+    // Internal VRF logic remains eligible for synthesis optimization.
+    (* DONT_TOUCH = "TRUE" *) vrf_probe u_vrf_probe (
         .clk(clk), .rst_n(rst_n), .write_enable(commit_write && !running && vrf_write),
         .write_addr(awaddr), .write_data(wdata), .read_addr(s_axi_lite.araddr[7:0]),
         .read_data(vrf_read_data)

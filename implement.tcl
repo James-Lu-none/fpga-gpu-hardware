@@ -34,9 +34,24 @@ if {[info exists ::env(FPGAGPU_HARDWARE_MODE)] && $::env(FPGAGPU_HARDWARE_MODE) 
     open_run synth_1
     set probes [get_cells -hierarchical -filter {REF_NAME == vrf_probe || ORIG_REF_NAME == vrf_probe}]
     if {[llength $probes] != 1} { error "Expected one synthesized VRF probe, found: $probes" }
+    # Report/check the exported interface before invoking XSim. Rebuilt
+    # hierarchy alone does not guarantee that RTL ports survive optimization.
+    set probe [lindex $probes 0]
+    set probe_ports {}
+    foreach pin [get_pins -of_objects $probe] {
+        regsub {\[[0-9]+\]$} [get_property REF_PIN_NAME $pin] {} port_name
+        lappend probe_ports $port_name
+    }
+    set probe_ports [lsort -unique $probe_ports]
+    puts "VRF synthesized probe ports: $probe_ports"
+    foreach required {clk rst_n write_enable write_addr read_addr write_data read_data} {
+        if {[lsearch -exact $probe_ports $required] < 0} {
+            error "VRF netlist interface lost port '$required'; actual ports: $probe_ports"
+        }
+    }
     set sim_dir [file join $output vrf-netlist]
     file mkdir $sim_dir
-    write_verilog -force -mode funcsim -cell [lindex $probes 0] -rename_top vrf_probe [file join $sim_dir vrf_probe_funcsim.v]
+    write_verilog -force -mode funcsim -cell $probe -rename_top vrf_probe [file join $sim_dir vrf_probe_funcsim.v]
     close_design
     set previous_dir [pwd]
     cd $sim_dir

@@ -49,6 +49,7 @@ vivado -mode batch -source write_bitstream.tcl
 - VRF resets only valid; BRAM, address and metadata payloads use clock-only blocks. Implementation rejects VRF `Synth 8-7137` reset-inference warnings.
 - `0x20084` is internal-stage snapshot version 1. `0x20088` holds aligned rs1/rs2 addresses in bytes 0/1 and their R0-select flags in bits 16/17. `0x2008C-0x20098` hold raw rs1/rs2 BRAM values before the R0 mux; raw R0 contents are unspecified.
 - In `l2` mode, implementation exports the synthesized `vrf_probe` hierarchy with `write_verilog -cell -mode funcsim` and runs `vrf_probe_tb` using XSim before routing. Logs/netlist stay under `artifacts/vivado/vrf-netlist/`; failure stops bitstream generation.
+- Only the diagnostic probe boundary uses `DONT_TOUCH` to preserve its testbench ports; its internal logic can still be optimized. Export checks and prints the actual port names before XSim.
 - `make -C sim vrf-check` checks back-to-back reads, reset flushing, RAM retention and two-cycle data/metadata alignment. `l2-memory-check` also verifies the AXI-Lite probe connection.
 
 ## verilog attributes
