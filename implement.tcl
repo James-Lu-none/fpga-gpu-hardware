@@ -28,6 +28,41 @@ if {[llength $vrf_reset_warnings]} {
     error "VRF reset inference is ambiguous:\n[join $vrf_reset_warnings \n]"
 }
 puts "PASS: VRF synthesis has no ambiguous reset warnings."
+# Simulate the actual synthesized probe, rather than synthesizing a different
+# standalone copy. All dependencies are inside this flat-port hierarchy.
+if {[info exists ::env(FPGAGPU_HARDWARE_MODE)] && $::env(FPGAGPU_HARDWARE_MODE) eq "l2"} {
+    open_run synth_1
+    set probes [get_cells -hierarchical -filter {REF_NAME == vrf_probe || ORIG_REF_NAME == vrf_probe}]
+    if {[llength $probes] != 1} { error "Expected one synthesized VRF probe, found: $probes" }
+    set sim_dir [file join $output vrf-netlist]
+    file mkdir $sim_dir
+    write_verilog -force -mode funcsim -cell [lindex $probes 0] -rename_top vrf_probe [file join $sim_dir vrf_probe_funcsim.v]
+    close_design
+    set previous_dir [pwd]
+    cd $sim_dir
+    try {
+        foreach command [list \
+            [list xvlog -work work --sv vrf_probe_funcsim.v [file join $hardware_root sim vrf_probe_tb.sv] [file join $::env(XILINX_VIVADO) data verilog src glbl.v]] \
+            [list xelab -debug typical -L unisims_ver -s vrf_funcsim work.vrf_probe_tb work.glbl] \
+            [list xsim vrf_funcsim -runall -log simulation.log]] {
+            puts "RUN: VRF netlist simulation: $command"
+            if {[catch {exec timeout --kill-after=5 300 {*}$command 2>@1} transcript]} {
+                puts $transcript
+                error "VRF netlist tool failed: [lindex $command 0]"
+            }
+            puts $transcript
+        }
+        set sim_log [open simulation.log r]
+        set sim_text [read $sim_log]
+        close $sim_log
+        if {[string first "PASS: VRF probe functional test" $sim_text] < 0} {
+            error "VRF synthesized netlist did not complete functional verification"
+        }
+        puts "PASS: VRF post-synthesis functional simulation."
+    } finally {
+        cd $previous_dir
+    }
+}
 reset_run impl_1
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1

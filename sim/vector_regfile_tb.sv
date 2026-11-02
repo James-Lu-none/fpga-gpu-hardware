@@ -6,7 +6,10 @@ module vector_regfile_tb;
     decode_if decode();
     operand_if op();
     wb_if wb();
-    vector_regfile dut(.clk(clk), .rst_n(rst_n), .decode(decode), .op(op), .wb(wb));
+    wire [31:0] read_select;
+    wire [63:0] raw1, raw2;
+    vector_regfile dut(.clk(clk), .rst_n(rst_n), .decode(decode), .op(op), .wb(wb),
+                      .debug_read_select(read_select), .debug_rs1_raw(raw1), .debug_rs2_raw(raw2));
     reg [63:0] golden [0:MAX_WARPS-1][0:NUM_REGS-1];
     typedef struct packed {
         logic [63:0] rs1, rs2;
@@ -15,6 +18,7 @@ module vector_regfile_tb;
         logic [$clog2(MAX_WARPS)-1:0] warp;
         logic [11:0] pc;
         logic [31:0] cycle;
+        logic [31:0] select;
     } expected_t;
     expected_t pending[$];
     integer cycle = 0, checks = 0, issued = 0, cancelled = 0;
@@ -31,7 +35,8 @@ module vector_regfile_tb;
                 e = pending.pop_front();
                 if (cycle - e.cycle != 2 || op.rs1_data !== e.rs1 || op.rs2_data !== e.rs2 ||
                     op.warp_id != e.warp || op.pc != e.pc || op.imm != e.tag ||
-                    op.active_mask != e.mask || op.opcode != e.opcode)
+                    op.active_mask != e.mask || op.opcode != e.opcode || read_select != e.select ||
+                    (!e.select[16] && raw1 !== e.rs1) || (!e.select[17] && raw2 !== e.rs2))
                     $fatal(1, "VRF pipeline mismatch warp=%0d pc=%h rs1=%h expected=%h rs2=%h expected=%h latency=%0d",
                            e.warp, e.pc, op.rs1_data, e.rs1, op.rs2_data, e.rs2, cycle-e.cycle);
                 checks++;
@@ -45,6 +50,9 @@ module vector_regfile_tb;
                 e.warp = decode.warp_id;
                 e.pc = decode.pc;
                 e.cycle = 32'(cycle);
+                e.select = (32'(decode.warp_id) << 5) | 32'(decode.rs1) |
+                    (((32'(decode.warp_id) << 5) | 32'(decode.rs2)) << 8) |
+                    (decode.rs1 == 0 ? 32'h10000 : 0) | (decode.rs2 == 0 ? 32'h20000 : 0);
                 pending.push_back(e);
                 issued++;
             end

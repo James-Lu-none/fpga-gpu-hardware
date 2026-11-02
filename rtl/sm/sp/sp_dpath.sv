@@ -45,7 +45,8 @@ module sp_dpath (
         .rst_n (rst_n),
         .decode (decode),
         .op (op),
-        .wb (wb)
+        .wb (wb),
+        .debug_read_select(), .debug_rs1_raw(), .debug_rs2_raw()
     );
 
     // Two execution stages: partial products, then low-32-bit accumulation.

@@ -39,7 +39,11 @@ module vector_regfile (
     operand_if.master op,
     
     // Write-Back Interface (From sm_execution_pipe)
-    wb_if.slave wb
+    wb_if.slave wb,
+    // Optional diagnostic taps, aligned with op.valid and op.rs*_data.
+    output reg [31:0] debug_read_select,
+    output reg [DATA_W-1:0] debug_rs1_raw,
+    output reg [DATA_W-1:0] debug_rs2_raw
 );
 
     // One register entry per warp/register pair.
@@ -140,6 +144,9 @@ module vector_regfile (
         op.is_imm <= decode_is_imm_q;
         op.rs1_data <= (addr_rs1_q[4:0] == 0) ? '0 : rs1_data_read;
         op.rs2_data <= (addr_rs2_q[4:0] == 0) ? '0 : rs2_data_read;
+        debug_read_select <= {14'd0, (addr_rs2_q[4:0] == 0), (addr_rs1_q[4:0] == 0), addr_rs2_q, addr_rs1_q};
+        debug_rs1_raw <= rs1_data_read;
+        debug_rs2_raw <= rs2_data_read;
     end
 
 endmodule

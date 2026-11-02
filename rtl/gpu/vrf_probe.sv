@@ -13,10 +13,15 @@ module vrf_probe (
     reg [31:0] writes, snapshots;
     reg [63:0] rs1_snapshot, rs2_snapshot;
     reg [31:0] metadata_snapshot, tag_snapshot, flags_snapshot;
+    reg [31:0] read_select_snapshot;
+    reg [63:0] raw1_snapshot, raw2_snapshot;
+    wire [31:0] read_select;
+    wire [63:0] raw1, raw2;
     decode_if decode();
     operand_if op();
     wb_if wb();
-    vector_regfile u_vrf(.clk(clk), .rst_n(rst_n), .decode(decode), .op(op), .wb(wb));
+    vector_regfile u_vrf(.clk(clk), .rst_n(rst_n), .decode(decode), .op(op), .wb(wb),
+                        .debug_read_select(read_select), .debug_rs1_raw(raw1), .debug_rs2_raw(raw2));
 
     assign wb.warp_id = wb_address[5 +: $clog2(MAX_WARPS)];
     assign wb.rd = wb_address[4:0];
@@ -52,6 +57,9 @@ module vrf_probe (
             metadata_snapshot <= 0;
             tag_snapshot <= 0;
             flags_snapshot <= 0;
+            read_select_snapshot <= 0;
+            raw1_snapshot <= 0;
+            raw2_snapshot <= 0;
         end else begin
             wb.valid <= 0;
             decode.valid <= 0;
@@ -79,6 +87,9 @@ module vrf_probe (
                 metadata_snapshot <= (32'(op.warp_id) << 16) | {20'd0, op.pc};
                 tag_snapshot <= op.imm;
                 flags_snapshot <= {7'd0, op.is_imm, op.opcode, 14'd0, op.active_mask[1:0]};
+                read_select_snapshot <= read_select;
+                raw1_snapshot <= raw1;
+                raw2_snapshot <= raw2;
             end
         end
     end
@@ -101,6 +112,12 @@ module vrf_probe (
             8'h78: read_data = tag_snapshot;
             8'h7c: read_data = flags_snapshot;
             8'h80: read_data = (32'(NUM_LANES) << 16) | (32'(MAX_WARPS) << 8) | 32'(NUM_REGS);
+            8'h84: read_data = 1; // Internal-stage snapshot version.
+            8'h88: read_data = read_select_snapshot;
+            8'h8c: read_data = raw1_snapshot[31:0];
+            8'h90: read_data = raw1_snapshot[63:32];
+            8'h94: read_data = raw2_snapshot[31:0];
+            8'h98: read_data = raw2_snapshot[63:32];
             default: read_data = 0;
         endcase
     end

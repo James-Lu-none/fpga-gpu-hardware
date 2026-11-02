@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: vrf-check l2-memory-check lsu-reset-check cache-store-check gpc-sim
+check: vrf-check vrf-probe-check l2-memory-check lsu-reset-check cache-store-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -83,3 +83,12 @@ VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/
 $(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
 	mkdir -p $(BUILD)/vrf
 	$(VERILATOR) $(FLAGS) --top-module vector_regfile_tb --Mdir $(BUILD)/vrf $(VRF_TEST_SOURCES) > $(BUILD)/vrf/compile.log 2>&1 || { cat $(BUILD)/vrf/compile.log; exit 1; }
+
+.PHONY: vrf-probe-check
+vrf-probe-check: $(BUILD)/vrf-probe/Vvrf_probe_tb
+	./$(BUILD)/vrf-probe/Vvrf_probe_tb
+
+VRF_PROBE_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile.sv $(RTL)/gpu/vrf_probe.sv vrf_probe_tb.sv
+$(BUILD)/vrf-probe/Vvrf_probe_tb: $(VRF_PROBE_SOURCES)
+	mkdir -p $(BUILD)/vrf-probe
+	$(VERILATOR) $(FLAGS) --top-module vrf_probe_tb --Mdir $(BUILD)/vrf-probe $(VRF_PROBE_SOURCES) > $(BUILD)/vrf-probe/compile.log 2>&1 || { cat $(BUILD)/vrf-probe/compile.log; exit 1; }
