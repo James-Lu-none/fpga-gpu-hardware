@@ -50,6 +50,9 @@ module axi_vram_model (
             read_delay <= 0;
             write_delay <= 0;
         end else begin
+            // RDATA is unspecified outside RVALID. Do not accidentally let
+            // write responses reuse a previous read's cache-line payload.
+            if (!bus.rvalid) bus.rdata <= '0;
             if (bus.awvalid && bus.awready) begin
                 if (bus.awlen != 0 || bus.awsize != 5 || bus.awburst != 1 ||
                     bus.awaddr[4:0] != 0 || bus.awaddr >= MEMORY_BYTES)

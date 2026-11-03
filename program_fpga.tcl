@@ -29,7 +29,8 @@ try {
     puts "PASS: detected FPGA $device on [current_hw_target]"
     # Match the GUI's Micron entry (alias: N25Q128 3.3V).
     if {$mode eq "flash"} {
-        set parts [get_cfgmem_parts -quiet mt25ql128-spi-x1_x2_x4]
+        # Scope the catalog to this FPGA and collapse repeated part names.
+        set parts [lsort -unique [get_cfgmem_parts -of_objects $device -quiet mt25ql128-spi-x1_x2_x4]]
         if {[llength $parts] != 1} { error "Configuration memory part not found or ambiguous: $parts" }
         create_hw_cfgmem -hw_device $device [lindex $parts 0]
         set cfgmem [get_property PROGRAM.HW_CFGMEM $device]
