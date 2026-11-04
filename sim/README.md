@@ -1,16 +1,28 @@
-# simulation flow
+# Simulation
 
-running following command:
+Run from the hardware repository root:
 
-```bash
+```sh
+make -C sim check
 make -C sim check TESTS=test_opencl_vector_add.c
+make -C sim mul32-check
 ```
 
-will generate following simulation flow
+- `unit/`: multiplier, vector register file, cache store and LSU reset tests.
+- `system/`: GPC integration testbench.
+- `models/`: behavioral AXI VRAM model.
+- `build/`: generated simulators, logs and workload results.
+- `../tests/`: assembly test programs and data.
 
-1. Makefile: build Vgpc_top_tb
-2. run_sim.sh: build test_opencl_vector_add.c to generate host_test, run host_test
-3. host_test calls clEnqueueNDRangeKernel() in opencl_sim.c
-4. clEnqueueNDRangeKernel() calls execute_simulator (run_kernel.sh)
-5. run_kernel.sh: build kernel.c to generate kernel.hex／kernel.s, run RTL
-6. host_test: read result back and compare with CPU result
+`check` runs the unit regressions and OpenCL workloads. Existing individual
+`vrf-check`, `cache-store-check`, `lsu-reset-check` and `gpc-sim` targets remain.
+The multiplier harness and pattern are also used by `../asic/Makefile` for
+RTL and mapped-netlist simulation; ASIC flow configuration stays in `asic/`.
+
+## OpenCL simulation flow
+
+1. Makefile builds `build/gpc/Vgpc_top_tb`.
+2. `run_sim.sh` builds and runs the selected host test.
+3. `opencl_sim.c` invokes `run_kernel.sh` when a kernel is dispatched.
+4. `run_kernel.sh` compiles the kernel and runs the RTL simulator.
+5. The host test compares returned results with its CPU reference.

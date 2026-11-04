@@ -33,44 +33,53 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: vrf-check cache-store-check lsu-reset-check gpc-sim
+check: mul32-check vrf-check cache-store-check lsu-reset-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
 
 lint:
-	$(VERILATOR) --lint-only --timing -Wno-fatal -I$(RTL)/common --top-module gpc_top_tb $(GPC_SOURCES) axi_vram_model.sv gpc_top_tb.sv
+	$(VERILATOR) --lint-only --timing -Wno-fatal -I$(RTL)/common --top-module gpc_top_tb $(GPC_SOURCES) models/axi_vram_model.sv system/gpc_top_tb.sv
 
 clean:
 	$(RM) -r -- "$(BUILD)"
 
-$(BUILD)/gpc/Vgpc_top_tb: gpc_top_tb.sv axi_vram_model.sv $(GPC_SOURCES)
+$(BUILD)/gpc/Vgpc_top_tb: system/gpc_top_tb.sv models/axi_vram_model.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)
-	$(VERILATOR) $(FLAGS) --top-module gpc_top_tb --Mdir $(BUILD)/gpc $(GPC_SOURCES) axi_vram_model.sv gpc_top_tb.sv > $(BUILD)/gpc_compile.log 2>&1 || { cat $(BUILD)/gpc_compile.log; exit 1; }
+	$(VERILATOR) $(FLAGS) --top-module gpc_top_tb --Mdir $(BUILD)/gpc $(GPC_SOURCES) models/axi_vram_model.sv system/gpc_top_tb.sv > $(BUILD)/gpc_compile.log 2>&1 || { cat $(BUILD)/gpc_compile.log; exit 1; }
 
 
 .PHONY: lsu-reset-check
 lsu-reset-check: $(BUILD)/lsu-reset/Vlsu_reset_tb
 	./$(BUILD)/lsu-reset/Vlsu_reset_tb
 
-$(BUILD)/lsu-reset/Vlsu_reset_tb: lsu_reset_tb.sv $(GPC_SOURCES)
+$(BUILD)/lsu-reset/Vlsu_reset_tb: unit/lsu_reset/lsu_reset_tb.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)/lsu-reset
-	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv unit/lsu_reset/lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
 
 .PHONY: cache-store-check
 cache-store-check: $(BUILD)/cache-store/Vcache_store_tb
 	./$(BUILD)/cache-store/Vcache_store_tb
 
-$(BUILD)/cache-store/Vcache_store_tb: cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_if.sv $(RTL)/gpu_pkg.sv
+$(BUILD)/cache-store/Vcache_store_tb: unit/cache_store/cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_if.sv $(RTL)/gpu_pkg.sv
 	mkdir -p $(BUILD)/cache-store
-	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/gpu_pkg.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/gpu_pkg.sv $(RTL)/common/cache_if.sv $(RTL)/common/unified_cache.sv unit/cache_store/cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
 
 .PHONY: vrf-check
 vrf-check: $(BUILD)/vrf/Vvector_regfile_tb
 	./$(BUILD)/vrf/Vvector_regfile_tb
 
-VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv vector_regfile_tb.sv
+VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv unit/vector_regfile/vector_regfile_tb.sv
 $(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
 	mkdir -p $(BUILD)/vrf
 	$(VERILATOR) $(FLAGS) --top-module vector_regfile_tb --Mdir $(BUILD)/vrf $(VRF_TEST_SOURCES) > $(BUILD)/vrf/compile.log 2>&1 || { cat $(BUILD)/vrf/compile.log; exit 1; }
 
+
+.PHONY: mul32-check
+mul32-check: $(BUILD)/mul32/Vtb_mul32
+	./$(BUILD)/mul32/Vtb_mul32
+
+MUL32_TEST_SOURCES := $(RTL)/sm/sp/unit/alu_int32_mul.sv unit/mul32/mul32_pattern.sv unit/mul32/tb_mul32.sv
+$(BUILD)/mul32/Vtb_mul32: $(MUL32_TEST_SOURCES)
+	mkdir -p $(BUILD)/mul32
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-TIMESCALEMOD --top-module tb_mul32 --Mdir $(BUILD)/mul32 $(MUL32_TEST_SOURCES) > $(BUILD)/mul32/compile.log 2>&1 || { cat $(BUILD)/mul32/compile.log; exit 1; }
