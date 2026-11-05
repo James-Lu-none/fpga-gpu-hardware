@@ -1,0 +1,10 @@
+# Nangate45 time unit: ns. Initial learning target: 100 MHz.
+create_clock -name core_clk -period 10.0 [get_ports clk]
+set_clock_uncertainty 0.10 [get_clocks core_clk]
+set_clock_transition 0.10 [get_clocks core_clk]
+set_input_delay -max 1.0 -clock core_clk [get_ports {a* b*}]
+set_input_delay -min 0.2 -clock core_clk [get_ports {a* b*}]
+set_output_delay -max 1.0 -clock core_clk [get_ports {result*}]
+set_output_delay -min 0.2 -clock core_clk [get_ports {result*}]
+set_driving_cell -lib_cell BUF_X1 [get_ports {a* b*}]
+set_load 5.0 [get_ports {result*}]
