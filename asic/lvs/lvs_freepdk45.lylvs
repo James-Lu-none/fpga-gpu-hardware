@@ -21,20 +21,23 @@
 tstart = Time.now
 
 # optionnal for a batch launch :   klayout -b -rd input=my_layout.gds -rd report=my_report.lyrdb -rd schematic=reference_netlist.cir -rd target_netlist=extracted_netlist.cir -r lvs_freepdk45.lvs
-if $input
+# ORFS supplies in_gds/top_cell; retain the upstream interactive interface.
+if $in_gds
+  source($in_gds, $top_cell)
+elsif $input
   source($input)
 end
 
-if $report
-  report($report)
+if $report_file || $report
+  report_lvs($report_file || $report)
 else
   report_lvs("lvs_report.lvsdb")
 end
 
-if $schematic
-#reference netlist
-   schematic($schematic)
-else 
+if $cdl_file || $schematic
+# Reference transistor-level netlist supplied by ORFS or the original interface.
+   schematic($cdl_file || $schematic)
+else
 #   schematic("sram_8_256_freepdk45.sp")
    schematic(RBA::CellView::active.filename.sub(/\.(oas|gds|oas.gz|gds.gz)$/, ".sp"))
 end
@@ -49,8 +52,10 @@ spice_with_comments = false
 
 if $target_netlist
   target_netlist($target_netlist)
+elsif $report_file
+  target_netlist($report_file.sub(/\.lvsdb$/, "_extracted.cir"))
 else
-   # target_netlist("netlist.cir", write_spice(spice_with_net_names, spice_with_comments), "The netlist comment goes here.") 
+   # target_netlist("netlist.cir", write_spice(spice_with_net_names, spice_with_comments), "The netlist comment goes here.")
    target_netlist(File.join(File.dirname(RBA::CellView::active.filename), source.cell_name+"_extracted.cir"), write_spice(spice_with_net_names, spice_with_comments),  "Extracted by KLayout on : #{Time.now.strftime("%d/%m/%Y %H:%M")}")
 end
 
@@ -214,11 +219,13 @@ for pat in %w(pnand*_0 and2_dec_0 port_address* replica_bitcell_array)
   connect_explicit(pat, [ "NWELL", "vdd" ])
   connect_explicit(pat, [ "BULK", "PWELL", "gnd" ])
 end
-  
+
 for pat in %w(XOR* XNOR* TLAT* TINV* TBUF* SDFF* OR* OAI*  NOR* NAND* MUX* LOGIC* INV* HA* FILLCELL*
               FA* DLL* DLH* DFF* DFFS* DFFR* DFFRS* CLKGATE*  CLKBUF* BUF* AOI* ANTENNA* AND*)
   connect_explicit(pat, [ "NWELL", "VDD" ])
-  connect_explicit(pat, [ "BULK", "VSS" ])
+  # Nangate CDL ties NMOS bulk to VSS; assumes implicit well supplies.
+  # This comparison assumption does not verify physical well-tap connectivity.
+  connect_explicit(pat, [ "BULK", "PWELL", "VSS" ])
 end
 
 # NangateOpenCellLibrary Digital gates  VDD VSS implicit connection due to lack of taps insides the cells
@@ -632,9 +639,8 @@ equivalent_pins("HA_X1","A","B")
 max_branch_complexity(65536)
 max_depth(16)
 
-if ! compare 
-  #raise "ERROR : Netlists don't match"
-  puts "ERROR : Netlists don't match"
+if ! compare
+  raise "ERROR : Netlists don't match"
 else
   puts "CONGRATULATIONS! Netlists match."
 end
