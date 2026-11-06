@@ -14,7 +14,7 @@ DOCKER = docker run --rm --user $$(id -u):$$(id -g) \
 RESULTS := $(BUILD)/results/nangate45/mul32/base
 REPORTS := $(BUILD)/reports/nangate45/mul32/base
 
-.PHONY: flow signoff sta drc lvs ir gate-test gui
+.PHONY: flow signoff drc lvs gate-test gui
 
 # Require an explicit ORFS stage; no tool runs when STAGE is empty.
 flow:
@@ -27,18 +27,11 @@ signoff:
 	@for ext in odb sdc spef gds v; do \
 	    test -s $(RESULTS)/6_final.$$ext || { echo "Missing final $$ext; run make -C asic flow STAGE=finish first."; exit 1; }; \
 	done
-	$(MAKE) sta
+	# Rerun ORFS final analysis: it produces STA and static IR together.
+	rm -f $(BUILD)/logs/nangate45/mul32/base/6_report.log
+	$(MAKE) flow STAGE=finish
 	$(MAKE) drc
 	$(MAKE) lvs
-	$(MAKE) ir
-
-# Reload final artifacts for standalone timing and static IR reports.
-sta ir:
-	mkdir -p $(BUILD)
-	$(DOCKER) -e CHECK=$@ $(IMAGE) \
-	    bash -c 'source /OpenROAD-flow-scripts/env.sh; openroad -exit /work/asic/mul32/verify.tcl' \
-	    > $(BUILD)/$@.log 2>&1 || { cat $(BUILD)/$@.log; exit 1; }
-	cat $(BUILD)/$@.log
 
 # Remove cached comparison reports so each signoff request reruns the checks.
 drc:
