@@ -303,7 +303,9 @@
 - RTL／Logic Design Engineer, 邏輯設計工程師: 微架構, RTL, 功能除錯, 並配合 timing／power／area 改善
 - Microarchitecture Engineer, 微架構工程師: 定義 pipelines, 資料路徑, 資源與控制等設計方案
 - DV — Design Verification Engineer, 設計驗證工程師: testbench, reference model, assertions, coverage 與功能回歸
-- Formal Verification Engineer, 形式驗證工程師: 依團隊執行 equivalence 或 property verification, 兩者能力需求有重疊但不完全相同
+- Formal Verification Engineer, 形式驗證工程師: 依團隊執行 equivalence Checking 或 property verification, 兩者能力需求有重疊但不完全相同
+    - Equivalence Checking Engineer, 等價性檢查工程師: 檢查「同一個電路的兩個不同版本」在功能上是否完全一模一樣
+    - Property Verification Engineer, 屬性驗證工程師: 使用 SVA 或 PSL 等語言，將晶片的規格轉換為數學邏輯上的屬性，並利用形式驗證工具確保電路符合規格，在任何極端情況下（Corner Cases）都不會出錯（如 Deadlock 或功能違規）
 - DFT Engineer, 可測試性設計工程師: scan, ATPG, BIST, test modes 與測試覆蓋率
 - FPGA Engineer: FPGA RTL, IP 整合, implementation, 板級驗證等; 和 ASIC PD 有部分可轉移基礎, 但流程不同
 
