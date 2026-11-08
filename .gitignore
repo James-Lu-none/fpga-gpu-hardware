@@ -129,3 +129,6 @@ impl_*/
 
 /build/
 *.xpr
+
+# Local ASIC flow outputs
+/artifacts/
