@@ -21,6 +21,7 @@ module thread_block_scheduler (
     // Flattened array of available warp slots per SM [NUM_SMS-1:0][4:0]
     input wire [(NUM_SMS*5)-1:0] sm_available_warp_slots,
     input wire [NUM_SMS-1:0] sm_block_accepted,
+    input wire [NUM_SMS-1:0] sm_idle,
 
     // SM Dispatch Interface (To SMs)
     output reg [NUM_SMS-1:0] sm_block_issue_valid,
@@ -74,16 +75,8 @@ module thread_block_scheduler (
         end
     end
 
-    // Check if all SMs are fully idle
-    reg all_idle;
-    always @(*) begin
-        all_idle = 1'b1;
-        for (j = 0; j < NUM_SMS; j = j + 1) begin
-            if (sm_slots[j] != MAX_WARPS[4:0]) begin
-                all_idle = 1'b0;
-            end
-        end
-    end
+    // Check if all SMs are fully idle via dedicated status signals
+    wire all_idle = &sm_idle;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

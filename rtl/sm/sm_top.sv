@@ -21,6 +21,7 @@ module streaming_multiprocessor #(
     
     output wire block_accepted,
     output wire [4:0] available_warp_slots,
+    output wire sm_idle,
 
     // Global Config & I-RAM Interface (From GPC)
     input wire [31:0] dma_src_addr,
@@ -112,6 +113,13 @@ module streaming_multiprocessor #(
     // Reporting stale free slots can over-dispatch and declare completion early.
     assign available_warp_slots = (rx_state == ST_IDLE) ? max_free_slots : 5'd0;
     wire alloc_ready = sp_alloc_ready[alloc_target_sp];
+
+    // SM Idle Status: receiver is ST_IDLE and all sub-partitions have all warp slots free
+    wire [NUM_SPS-1:0] sp_all_free;
+    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_sp_idle_check
+        assign sp_all_free[s] = (sp_avail_slots[s] == MAX_WARPS[4:0]);
+    end
+    assign sm_idle = (rx_state == ST_IDLE) && (&sp_all_free);
 
     reg alloc_valid_reg;
     reg block_accepted_reg;

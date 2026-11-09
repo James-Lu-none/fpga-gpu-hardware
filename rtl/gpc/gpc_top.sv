@@ -104,6 +104,7 @@ module gpc_top #(
         .grid_done (grid_done_status),
         .sm_available_warp_slots(sm_available_warp_slots),
         .sm_block_accepted (sm_block_accepted),
+        .sm_idle (sm_idle),
         .sm_block_issue_valid (sm_block_issue_valid),
         .sm_block_idx_x (sm_block_idx_x),
         .sm_block_idx_y (sm_block_idx_y),
@@ -121,6 +122,7 @@ module gpc_top #(
     wire [NUM_SM_INST-1:0] sm_l1_rsp_valid;
     wire [255:0] sm_l1_rsp_rdata [0:NUM_SM_INST-1];
 
+    wire [NUM_SM_INST-1:0] sm_idle;
     wire [4:0] sm_slots [0:NUM_SM_INST-1];
 
     for (genvar n = 0; n < NUM_SM_INST; n = n + 1) begin : gen_sm_array
@@ -138,6 +140,7 @@ module gpc_top #(
             .warps_per_block      (sm_warps_per_block),
             .block_accepted       (sm_block_accepted[n]),
             .available_warp_slots (sm_slots[n]),
+            .sm_idle              (sm_idle[n]),
             .dma_src_addr         (src_addr),
             .dma_dst_addr         (dst_addr),
             .iram_we              (iram_we_reg),
