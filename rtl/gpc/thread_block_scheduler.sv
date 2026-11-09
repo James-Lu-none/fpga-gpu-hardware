@@ -30,8 +30,6 @@ module thread_block_scheduler (
     output wire busy
 );
 
-    assign busy = (state != STATE_IDLE);
-
     // Unpack available warp slots for easier access
     wire [4:0] sm_slots [0:NUM_SMS-1];
     genvar i;
@@ -53,6 +51,8 @@ module thread_block_scheduler (
     reg [31:0] threads_per_block;
     reg [4:0] warps_per_block;
     reg [3:0] chosen_sm_idx;
+
+    assign busy = (state != STATE_IDLE);
 
     // Arbitration / Selection Logic (Combinational)
     reg [4:0] max_slots;
