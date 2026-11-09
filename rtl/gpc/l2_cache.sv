@@ -95,7 +95,13 @@ module l2_cache #(
     assign m_axi_rready = memory_bus.rsp_ready && !memory_bus.req_we;
 
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n || flush) begin
+        // this will casue: condition cannot be matched to any signal from the event list
+        // as rst is async and flush is sync signal
+        // if (!rst_n || flush) begin
+        if (!rst_n) begin
+            aw_done <= 1'b0;
+            w_done <= 1'b0;
+        end else if (flush) begin
             aw_done <= 1'b0;
             w_done <= 1'b0;
         end else begin
