@@ -9,7 +9,7 @@ package gpu_pkg;
 
     // Architecture Hierarchy Parameters (N, M, K)
     parameter NUM_SMS = 2;
-    parameter NUM_SUB_PARTITIONS = 1;
+    parameter NUM_SUB_PARTITIONS = 2;
     parameter NUM_LANES = 4;
 
     // Derived & Microarchitectural Parameters
