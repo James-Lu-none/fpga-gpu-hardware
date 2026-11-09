@@ -25,7 +25,8 @@ module unified_cache #(
 
     (* ram_style = "block" *) reg [DATA_W-1:0] data_ram [0:NUM_LINES-1];
     (* ram_style = "block" *) reg [TAG_BITS-1:0] tag_ram [0:NUM_LINES-1];
-    reg valid_ram [0:NUM_LINES-1];
+    // update valid column to use vector, as it is not part of the SRAM data array.
+    reg [NUM_LINES-1:0] valid_ram = '0;
 
     reg [DATA_W-1:0] data_dout;
     reg [TAG_BITS-1:0] tag_dout;
@@ -52,13 +53,6 @@ module unified_cache #(
     assign memory.req_wstrb = req_wstrb_q;
     assign memory.req_we = req_we_q;
     assign memory.rsp_ready = (state == ST_WAIT_MEM);
-
-    integer i;
-    initial begin
-        for (i = 0; i < NUM_LINES; i = i + 1) begin
-            valid_ram[i] = 1'b0;
-        end
-    end
 
     // Keep each inferred RAM in one process. Reset/flush only invalidate lines;
     // clearing the wide data RAM would prevent block RAM inference. The cache
@@ -89,15 +83,11 @@ module unified_cache #(
             req_we_q <= 1'b0;
             req_index_q <= '0;
             req_tag_q <= '0;
-            for (i = 0; i < NUM_LINES; i = i + 1) begin
-                valid_ram[i] = 1'b0;
-            end
+            valid_ram <= '0;
         end else if (flush) begin
             state <= ST_IDLE;
             core.rsp_valid <= 1'b0;
-            for (i = 0; i < NUM_LINES; i = i + 1) begin
-                valid_ram[i] = 1'b0;
-            end
+            valid_ram <= '0;
         end else begin
             core.rsp_valid <= 1'b0;
 
