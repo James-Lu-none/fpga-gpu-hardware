@@ -232,13 +232,7 @@ The entire system uses XDMA's generated clock (axi_aclk: 125MHz) and asynchronou
   This 1-cycle cache architecture puts the arbitration MUX, RAM read, Tag compare, and AXI state transition all in a single cycle (`STATE_IDLE`), causing a massive combinational path.
   Fix: We pipelined the L2 cache arbitration by introducing a new FSM state `STATE_COMPARE`. In `STATE_IDLE`, the arbiter only determines the winning SM and latches the request into pipeline registers (`latched_req_*`). In `STATE_COMPARE`, the FSM uses the latched request to index the RAMs, execute the hit/miss logic, and determine the next AXI state. This isolates the arbitration MUX into its own cycle and completely breaks the critical path into the Cache RAM address decoders.
 
-## RTL simulation
-
-```bash
-make -C sim check
-```
-
-# GPU performance counters
+### GPU performance counters
 
 | AXI-Lite offset | Counter | Event definition |
 | --- | --- | --- |
@@ -271,3 +265,28 @@ lookup, so this equality need not hold mid-kernel.
 LSU FIFO counters count instructions, not lane memory beats; divergent addresses
 can generate multiple cache requests per instruction. Summed LSU wait/full
 cycles can exceed GPC `cycle_count` because several SPs wait simultaneously.
+
+### Assertion failed: Kernel did not exercise AXI VRAM reads/writes when NUM_SUB_PARTITIONS >= 2 
+
+```log
+[Cycle 198] [ASSERT] TBS -> SM0: sm_block_issue_valid ASSERTED (block=[0,0], warps=1)
+[Cycle 199] [ASSERT] SM0 -> TBS: sm_block_accepted ASSERTED
+[Cycle 199] [SM0_RX_STATE] ST_IDLE -> ST_ISSUE_WARP (warp_cnt=0/1, target_sp=0, alloc_ready=1, max_free_slots=8)
+[Cycle 200] [ASSERT] SM0 SP0: alloc.valid ASSERTED (ready=1, warp_cnt=0, thread_start=0, block_id=0)
+[Cycle 200] [HANDSHAKE] SM0 SP0: ALLOC HANDSHAKE FIRE! (warp_cnt=0, thread_start=0, block=[0,0])
+[Cycle 201] [SLOTS] SM0 SP0: sp_avail_slots 8 -> 7 (ready=1)
+[Cycle 201] [SM0_RX_STATE] ST_WAIT_WARP -> ST_NEXT_WARP (warp_cnt=0/1, target_sp=1, alloc_ready=1, max_free_slots=8)
+[Cycle 201] [ALLOC_TARGET] SM0: alloc_target_sp changed SP0 -> SP1 (max_free_slots=8)
+[Cycle 202] [SM0_RX_STATE] ST_NEXT_WARP -> ST_IDLE (warp_cnt=0/1, target_sp=1, alloc_ready=1, max_free_slots=8)
+[Cycle 202] [SLOTS] SM0: available_warp_slots changed 0 -> 8 (max_free_slots=8, rx_state=ST_IDLE)
+[Cycle 202] [ASSERT] TBS: all_idle ASSERTED! (state=WAIT_DONE, sm0_slots=8, sm1_slots=8, MAX_WARPS=8)
+[Cycle 203] [TBS_STATE] WAIT_DONE -> IDLE
+[Cycle 203] [ASSERT] TBS: grid_done ASSERTED!
+GPC launch-to-IRQ: 7 cycles (0.056 us)
+Assertion failed: Kernel did not exercise AXI VRAM reads/writes
+```
+
+Cause: When `NUM_SUB_PARTITIONS >= 2`, the SM reports `available_warp_slots` as the maximum free slots across all SPs (`max(sp_avail_slots)`). When SP0 is allocated a warp, its free slots drop to 7 while SP1 still has 8, so the SM continues reporting `max(7, 8) = 8`. The thread block scheduler previously checked `sm_slots[j] == MAX_WARPS` to determine whether SMs are idle. Seeing 8 slots (`MAX_WARPS`), it considered SM0 idle and asserted `all_idle` and `grid_done` prematurely (in ~7 cycles), terminating execution before SP0 could issue any memory requests.
+
+Fix: Decoupled thread block dispatch capacity from idle detection by introducing a dedicated `sm_idle` status signal. In `sm_top.sv`, `sm_idle` is only asserted when the SM receiver FSM is in `ST_IDLE` and all SPs have all warp slots free (`&sp_all_free`). In `thread_block_scheduler.sv`, `all_idle` is now driven by `&sm_idle` rather than inspecting `available_warp_slots`, and `gpc_top.sv` connects `sm_idle` across all SM instances to the scheduler.
+
