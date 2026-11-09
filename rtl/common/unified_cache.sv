@@ -23,13 +23,14 @@ module unified_cache #(
     localparam [2:0] ST_WAIT_MEM = 3'd3;
     localparam [2:0] ST_WRITE_MEM = 3'd4;
 
-    (* ram_style = "block" *) reg [DATA_W-1:0] data_ram [0:NUM_LINES-1];
-    (* ram_style = "block" *) reg [TAG_BITS-1:0] tag_ram [0:NUM_LINES-1];
+    // move into cache_line_ram for module boundary
+    // (* ram_style = "block" *) reg [DATA_W-1:0] data_ram [0:NUM_LINES-1];
+    // (* ram_style = "block" *) reg [TAG_BITS-1:0] tag_ram [0:NUM_LINES-1];
     // update valid column to use vector, as it is not part of the SRAM data array.
     reg [NUM_LINES-1:0] valid_ram = '0;
 
-    reg [DATA_W-1:0] data_dout;
-    reg [TAG_BITS-1:0] tag_dout;
+    wire [DATA_W-1:0] data_dout;
+    wire [TAG_BITS-1:0] tag_dout;
     reg valid_dout;
     reg [2:0] state;
 
@@ -54,21 +55,29 @@ module unified_cache #(
     assign memory.req_we = req_we_q;
     assign memory.rsp_ready = (state == ST_WAIT_MEM);
 
-    // Keep each inferred RAM in one process. Reset/flush only invalidate lines;
-    // clearing the wide data RAM would prevent block RAM inference. The cache
-    // controller itself stays separate from the RAM template so L1 and L2 can
-    // share this module with different line counts and tag widths.
+    // Keep storage boundary separate so ASIC can pack data and tag in one 1RW SRAM
+    cache_line_ram #(
+        .DATA_W(DATA_W), .TAG_W(TAG_BITS), .NUM_LINES(NUM_LINES), .ADDR_W(INDEX_BITS)
+    ) u_storage (
+        .clk(clk),
+        .read_enable(core_req_fire), 
+        .read_address(core_index), .read_data(data_dout), .read_tag(tag_dout),
+        .write_enable(memory_rsp_fire && !req_we_q),
+        .write_address(req_index_q), .write_data(memory.rsp_rdata), .write_tag(req_tag_q)
+    );
+
     always @(posedge clk) begin
-        if (core_req_fire) begin
-            data_dout <= data_ram[core_index];
-            tag_dout <= tag_ram[core_index];
-        end
-        // Only reads return a cache line. A store acknowledgement has no
-        // valid read payload and must leave the written line invalid.
-        if (memory_rsp_fire && !req_we_q) begin
-            data_ram[req_index_q] <= memory.rsp_rdata;
-            tag_ram[req_index_q] <= req_tag_q;
-        end
+        // move into cache_line_ram for module boundary
+        // if (core_req_fire) begin
+        //     data_dout <= data_ram[core_index];
+        //     tag_dout <= tag_ram[core_index];
+        // end
+        // // Only reads return a cache line. A store acknowledgement has no
+        // // valid read payload and must leave the written line invalid.
+        // if (memory_rsp_fire && !req_we_q) begin
+        //     data_ram[req_index_q] <= memory.rsp_rdata;
+        //     tag_ram[req_index_q] <= req_tag_q;
+        // end
         valid_dout <= valid_ram[core_index];
     end
 
