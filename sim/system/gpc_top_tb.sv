@@ -108,6 +108,363 @@ module gpc_top_tb;
         lite_read(addr, readback);
         if (readback !== data) $fatal(1, "Register readback addr=%h got=%h expected=%h", addr, readback, data);
     endtask
+
+    // SM-SP Arbiter & Allocation Signal Monitor
+    bit trace_arbiter = 1;
+    initial begin
+        if ($test$plusargs("no_trace_arb")) trace_arbiter = 0;
+    end
+
+    function automatic string rx_state_name(input [2:0] st);
+        case (st)
+            3'd0: return "ST_IDLE";
+            3'd1: return "ST_ISSUE_WARP";
+            3'd2: return "ST_WAIT_WARP";
+            3'd3: return "ST_NEXT_WARP";
+            default: return "UNKNOWN";
+        endcase
+    endfunction
+
+    function automatic string tbs_state_name(input [1:0] st);
+        case (st)
+            2'd0: return "IDLE";
+            2'd1: return "ISSUE";
+            2'd2: return "WAIT_ACK";
+            2'd3: return "WAIT_DONE";
+            default: return "UNKNOWN";
+        endcase
+    endfunction
+
+    function automatic string lsu_state_name(input [1:0] st);
+        case (st)
+            2'd0: return "LSU_IDLE";
+            2'd1: return "LSU_ISSUE";
+            2'd2: return "LSU_WAIT";
+            default: return "UNKNOWN";
+        endcase
+    endfunction
+
+    // TBS Launch & Completion Monitor
+    reg [1:0] prev_tbs_state;
+    reg prev_all_idle;
+    reg prev_grid_done;
+    reg [NUM_SMS-1:0] prev_sm_issue_valid;
+    reg [NUM_SMS-1:0] prev_sm_accepted;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            prev_tbs_state       <= 2'd0;
+            prev_all_idle        <= 1'b0;
+            prev_grid_done       <= 1'b0;
+            prev_sm_issue_valid  <= '0;
+            prev_sm_accepted     <= '0;
+        end else if (trace_arbiter) begin
+            if (dut.u_scheduler.state != prev_tbs_state) begin
+                $display("[Cycle %0d] [TBS_STATE] %s -> %s (found=%b, best_sm=%0d, max_slots=%0d)",
+                         cycles, tbs_state_name(prev_tbs_state), tbs_state_name(dut.u_scheduler.state),
+                         dut.u_scheduler.sm_found, dut.u_scheduler.best_sm, dut.u_scheduler.max_slots);
+                prev_tbs_state <= dut.u_scheduler.state;
+            end
+            if (!prev_all_idle && dut.u_scheduler.all_idle) begin
+                $display("[Cycle %0d] [ASSERT] TBS: all_idle ASSERTED! (state=%s, sm0_slots=%0d, sm1_slots=%0d, MAX_WARPS=%0d)",
+                         cycles, tbs_state_name(dut.u_scheduler.state),
+                         dut.gen_sm_array[0].u_sm.available_warp_slots,
+                         (NUM_SMS > 1 ? dut.gen_sm_array[1].u_sm.available_warp_slots : 5'd0),
+                         gpu_pkg::MAX_WARPS);
+            end
+            prev_all_idle <= dut.u_scheduler.all_idle;
+
+            if (!prev_grid_done && dut.u_scheduler.grid_done) begin
+                $display("[Cycle %0d] [ASSERT] TBS: grid_done ASSERTED!", cycles);
+            end
+            prev_grid_done <= dut.u_scheduler.grid_done;
+
+            for (int s = 0; s < NUM_SMS; s++) begin
+                if (!prev_sm_issue_valid[s] && dut.u_scheduler.sm_block_issue_valid[s]) begin
+                    $display("[Cycle %0d] [ASSERT] TBS -> SM%0d: sm_block_issue_valid ASSERTED (block=[%0d,%0d], warps=%0d)",
+                             cycles, s, dut.u_scheduler.sm_block_idx_x, dut.u_scheduler.sm_block_idx_y, dut.u_scheduler.sm_warps_per_block);
+                end
+                if (!prev_sm_accepted[s] && dut.sm_block_accepted[s]) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d -> TBS: sm_block_accepted ASSERTED", cycles, s);
+                end
+                prev_sm_issue_valid[s] <= dut.u_scheduler.sm_block_issue_valid[s];
+                prev_sm_accepted[s]    <= dut.sm_block_accepted[s];
+            end
+        end
+    end
+
+    // SM & SP Arbiter / Allocation Monitors
+    for (genvar sm = 0; sm < NUM_SMS; sm++) begin : mon_sm_block
+        reg [2:0] prev_rx_state;
+        reg prev_block_accepted;
+        reg prev_alloc_valid;
+        reg [4:0] prev_avail_slots;
+        integer prev_alloc_target_sp;
+
+        reg prev_l1_req_valid_int;
+        reg prev_l1_rsp_valid_int;
+        reg prev_sm_l1_req_valid;
+        reg prev_sm_l1_rsp_valid;
+
+        always @(posedge clk) begin
+            if (!rst_n) begin
+                prev_rx_state          <= 3'd0;
+                prev_block_accepted    <= 1'b0;
+                prev_alloc_valid       <= 1'b0;
+                prev_avail_slots       <= 5'd0;
+                prev_alloc_target_sp   <= '0;
+                prev_l1_req_valid_int  <= 1'b0;
+                prev_l1_rsp_valid_int  <= 1'b0;
+                prev_sm_l1_req_valid   <= 1'b0;
+                prev_sm_l1_rsp_valid   <= 1'b0;
+            end else if (trace_arbiter) begin
+                // rx_state transition
+                if (dut.gen_sm_array[sm].u_sm.rx_state != prev_rx_state) begin
+                    $display("[Cycle %0d] [SM%0d_RX_STATE] %s -> %s (warp_cnt=%0d/%0d, target_sp=%0d, alloc_ready=%b, max_free_slots=%0d)",
+                             cycles, sm, rx_state_name(prev_rx_state),
+                             rx_state_name(dut.gen_sm_array[sm].u_sm.rx_state),
+                             dut.gen_sm_array[sm].u_sm.warp_cnt,
+                             dut.gen_sm_array[sm].u_sm.accepted_warps_per_block,
+                             dut.gen_sm_array[sm].u_sm.alloc_target_sp,
+                             dut.gen_sm_array[sm].u_sm.alloc_ready,
+                             dut.gen_sm_array[sm].u_sm.max_free_slots);
+                    prev_rx_state <= dut.gen_sm_array[sm].u_sm.rx_state;
+                end
+
+                // block_accepted
+                if (!prev_block_accepted && dut.gen_sm_array[sm].u_sm.block_accepted) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d: block_accepted ASSERTED", cycles, sm);
+                end
+                prev_block_accepted <= dut.gen_sm_array[sm].u_sm.block_accepted;
+
+                // alloc_valid_reg
+                if (!prev_alloc_valid && dut.gen_sm_array[sm].u_sm.alloc_valid_reg) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d: alloc_valid_reg ASSERTED (target_sp=%0d, alloc_ready=%b, warp_cnt=%0d)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.alloc_target_sp,
+                             dut.gen_sm_array[sm].u_sm.alloc_ready,
+                             dut.gen_sm_array[sm].u_sm.warp_cnt);
+                end
+                prev_alloc_valid <= dut.gen_sm_array[sm].u_sm.alloc_valid_reg;
+
+                // available_warp_slots
+                if (dut.gen_sm_array[sm].u_sm.available_warp_slots != prev_avail_slots) begin
+                    $display("[Cycle %0d] [SLOTS] SM%0d: available_warp_slots changed %0d -> %0d (max_free_slots=%0d, rx_state=%s)",
+                             cycles, sm, prev_avail_slots,
+                             dut.gen_sm_array[sm].u_sm.available_warp_slots,
+                             dut.gen_sm_array[sm].u_sm.max_free_slots,
+                             rx_state_name(dut.gen_sm_array[sm].u_sm.rx_state));
+                    prev_avail_slots <= dut.gen_sm_array[sm].u_sm.available_warp_slots;
+                end
+
+                // alloc_target_sp
+                if (dut.gen_sm_array[sm].u_sm.alloc_target_sp != prev_alloc_target_sp) begin
+                    $display("[Cycle %0d] [ALLOC_TARGET] SM%0d: alloc_target_sp changed SP%0d -> SP%0d (max_free_slots=%0d)",
+                             cycles, sm, prev_alloc_target_sp,
+                             dut.gen_sm_array[sm].u_sm.alloc_target_sp,
+                             dut.gen_sm_array[sm].u_sm.max_free_slots);
+                    prev_alloc_target_sp <= dut.gen_sm_array[sm].u_sm.alloc_target_sp;
+                end
+
+                // l1_req_valid_int
+                if (!prev_l1_req_valid_int && dut.gen_sm_array[sm].u_sm.l1_req_valid_int) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d: l1_req_valid_int ASSERTED (addr=0x%08h, we=%b, wstrb=0x%02h, ready=%b)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_req_addr_int,
+                             dut.gen_sm_array[sm].u_sm.l1_req_we_int,
+                             dut.gen_sm_array[sm].u_sm.l1_req_wstrb_int,
+                             dut.gen_sm_array[sm].u_sm.l1_req_ready_int);
+                end
+                if (dut.gen_sm_array[sm].u_sm.l1_req_valid_int && dut.gen_sm_array[sm].u_sm.l1_req_ready_int) begin
+                    $display("[Cycle %0d] [HANDSHAKE] SM%0d -> L1 Cache: REQ HANDSHAKE (addr=0x%08h, we=%b)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_req_addr_int,
+                             dut.gen_sm_array[sm].u_sm.l1_req_we_int);
+                end
+                prev_l1_req_valid_int <= dut.gen_sm_array[sm].u_sm.l1_req_valid_int;
+
+                // l1_rsp_valid_int
+                if (!prev_l1_rsp_valid_int && dut.gen_sm_array[sm].u_sm.l1_rsp_valid_int) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d: l1_rsp_valid_int ASSERTED (rdata=0x%08h)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_rsp_rdata_int[31:0]);
+                end
+                prev_l1_rsp_valid_int <= dut.gen_sm_array[sm].u_sm.l1_rsp_valid_int;
+
+                // SM -> L2 interface
+                if (!prev_sm_l1_req_valid && dut.gen_sm_array[sm].u_sm.l1_req_valid) begin
+                    $display("[Cycle %0d] [ASSERT] SM%0d -> L2: l1_req_valid ASSERTED (addr=0x%08h, we=%b, ready=%b)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_req_addr,
+                             dut.gen_sm_array[sm].u_sm.l1_req_we,
+                             dut.gen_sm_array[sm].u_sm.l1_req_ready);
+                end
+                if (dut.gen_sm_array[sm].u_sm.l1_req_valid && dut.gen_sm_array[sm].u_sm.l1_req_ready) begin
+                    $display("[Cycle %0d] [HANDSHAKE] SM%0d -> L2: REQ HANDSHAKE (addr=0x%08h, we=%b)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_req_addr,
+                             dut.gen_sm_array[sm].u_sm.l1_req_we);
+                end
+                prev_sm_l1_req_valid <= dut.gen_sm_array[sm].u_sm.l1_req_valid;
+
+                if (!prev_sm_l1_rsp_valid && dut.gen_sm_array[sm].u_sm.l1_rsp_valid) begin
+                    $display("[Cycle %0d] [ASSERT] L2 -> SM%0d: l1_rsp_valid ASSERTED (rdata=0x%08h)",
+                             cycles, sm, dut.gen_sm_array[sm].u_sm.l1_rsp_rdata[31:0]);
+                end
+                prev_sm_l1_rsp_valid <= dut.gen_sm_array[sm].u_sm.l1_rsp_valid;
+            end
+        end
+
+        // Multi-SP specific monitors (gen_alloc_target_multi and gen_l1_arb_multi)
+        if (NUM_SUB_PARTITIONS > 1) begin : mon_multi
+            reg prev_arb_state;
+            reg [$clog2(NUM_SUB_PARTITIONS)-1:0] prev_current_client;
+            reg [$clog2(NUM_SUB_PARTITIONS)-1:0] prev_rr_ptr;
+            reg prev_client_found;
+
+            always @(posedge clk) begin
+                if (!rst_n) begin
+                    prev_arb_state      <= 1'b0;
+                    prev_current_client <= '0;
+                    prev_rr_ptr         <= '0;
+                    prev_client_found   <= 1'b0;
+                end else if (trace_arbiter) begin
+                    if (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state != prev_arb_state) begin
+                        $display("[Cycle %0d] [L1_ARB_STATE] SM%0d: arb_state %s -> %s (current_client=%0d, sel_client=%0d, found=%b, rr_ptr=%0d, req_ready_int=%b, rsp_valid_int=%b)",
+                                 cycles, sm,
+                                 (prev_arb_state ? "ARB_BUSY" : "ARB_IDLE"),
+                                 (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state ? "ARB_BUSY" : "ARB_IDLE"),
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client,
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.sel_client,
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found,
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr,
+                                 dut.gen_sm_array[sm].u_sm.l1_req_ready_int,
+                                 dut.gen_sm_array[sm].u_sm.l1_rsp_valid_int);
+                        prev_arb_state <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state;
+                    end
+                    if (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client != prev_current_client) begin
+                        $display("[Cycle %0d] [L1_ARB_CLIENT] SM%0d: current_client %0d -> %0d (rr_ptr=%0d)",
+                                 cycles, sm, prev_current_client,
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client,
+                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr);
+                        prev_current_client <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client;
+                    end
+                    if (!prev_client_found && dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d L1 Arbiter: client_found ASSERTED (sel_client=%0d, l1_req_ready_int=%b, arb_state=%s)",
+                                 cycles, sm, dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.sel_client,
+                                 dut.gen_sm_array[sm].u_sm.l1_req_ready_int,
+                                 (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state ? "ARB_BUSY" : "ARB_IDLE"));
+                    end
+                    prev_client_found <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found;
+                    prev_rr_ptr       <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr;
+                end
+            end
+        end
+
+        // SP-level monitors
+        for (genvar sp = 0; sp < NUM_SUB_PARTITIONS; sp++) begin : mon_sp_block
+            reg prev_sp_alloc_valid;
+            reg [4:0] prev_sp_avail_slots;
+            reg prev_sp_req_valid;
+            reg prev_sp_rsp_valid;
+            reg [1:0] prev_lsu_state;
+
+            always @(posedge clk) begin
+                if (!rst_n) begin
+                    prev_sp_alloc_valid  <= 1'b0;
+                    prev_sp_avail_slots  <= 5'd0;
+                    prev_sp_req_valid    <= 1'b0;
+                    prev_sp_rsp_valid    <= 1'b0;
+                    prev_lsu_state       <= 2'd0;
+                end else if (trace_arbiter) begin
+                    // SP allocation valid assertion
+                    if (!prev_sp_alloc_valid && dut.gen_sm_array[sm].u_sm.alloc[sp].valid) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d: alloc.valid ASSERTED (ready=%b, warp_cnt=%0d, thread_start=%0d, block_id=%0d)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.alloc[sp].ready,
+                                 dut.gen_sm_array[sm].u_sm.warp_cnt,
+                                 dut.gen_sm_array[sm].u_sm.alloc[sp].thread_id_start,
+                                 dut.gen_sm_array[sm].u_sm.alloc[sp].block_id);
+                    end
+                    // Allocation handshake
+                    if (dut.gen_sm_array[sm].u_sm.alloc[sp].valid && dut.gen_sm_array[sm].u_sm.alloc[sp].ready) begin
+                        $display("[Cycle %0d] [HANDSHAKE] SM%0d SP%0d: ALLOC HANDSHAKE FIRE! (warp_cnt=%0d, thread_start=%0d, block=[%0d,%0d])",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.warp_cnt,
+                                 dut.gen_sm_array[sm].u_sm.alloc[sp].thread_id_start,
+                                 dut.gen_sm_array[sm].u_sm.alloc[sp].block_idx_x,
+                                 dut.gen_sm_array[sm].u_sm.alloc[sp].block_idx_y);
+                    end
+                    prev_sp_alloc_valid <= dut.gen_sm_array[sm].u_sm.alloc[sp].valid;
+
+                    // SP available slots changed
+                    if (dut.gen_sm_array[sm].u_sm.sp_avail_slots[sp] != prev_sp_avail_slots) begin
+                        $display("[Cycle %0d] [SLOTS] SM%0d SP%0d: sp_avail_slots %0d -> %0d (ready=%b)",
+                                 cycles, sm, sp, prev_sp_avail_slots,
+                                 dut.gen_sm_array[sm].u_sm.sp_avail_slots[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_alloc_ready[sp]);
+                        prev_sp_avail_slots <= dut.gen_sm_array[sm].u_sm.sp_avail_slots[sp];
+                    end
+
+                    // SP L1 request valid assertion
+                    if (!prev_sp_req_valid && dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp]) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d: sp_l1_req_valid ASSERTED (addr=0x%08h, we=%b, wstrb=0x%02h, wdata=0x%08h, ready=%b)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_req_addr[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_we[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_wstrb[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_wdata[sp][31:0],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp]);
+                    end
+                    // SP L1 request handshake
+                    if (dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp] && dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp]) begin
+                        $display("[Cycle %0d] [HANDSHAKE] SM%0d SP%0d -> L1: REQ HANDSHAKE FIRE! (addr=0x%08h, we=%b)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_req_addr[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_we[sp]);
+                    end
+                    prev_sp_req_valid <= dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp];
+
+                    // SP L1 response valid assertion
+                    if (!prev_sp_rsp_valid && dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp]) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d <- L1: sp_l1_rsp_valid ASSERTED (rdata=0x%08h)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_rsp_rdata[sp][31:0]);
+                    end
+                    prev_sp_rsp_valid <= dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp];
+
+                    // LSU State
+                    if (dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state != prev_lsu_state) begin
+                        $display("[Cycle %0d] [LSU_STATE] SM%0d SP%0d: %s -> %s (fifo_cnt=%0d, req_valid=%b, req_ready=%b, rsp_valid=%b)",
+                                 cycles, sm, sp,
+                                 lsu_state_name(prev_lsu_state),
+                                 lsu_state_name(dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state),
+                                 dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.fifo_count,
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp]);
+                        prev_lsu_state <= dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state;
+                    end
+                end
+            end
+        end
+    end
+
+    // AXI / DRAM Transactions Monitor
+    always @(posedge clk) begin
+        if (rst_n && trace_arbiter) begin
+            if (dut.u_l2_cache.m_axi_arvalid && dut.u_l2_cache.m_axi_arready) begin
+                $display("[Cycle %0d] [AXI_DRAM] READ ADDR HANDSHAKE: araddr=0x%08h arlen=%0d",
+                         cycles, dut.u_l2_cache.m_axi_araddr, dut.u_l2_cache.m_axi_arlen);
+            end
+            if (dut.u_l2_cache.m_axi_rvalid && dut.u_l2_cache.m_axi_rready) begin
+                $display("[Cycle %0d] [AXI_DRAM] READ DATA HANDSHAKE: rlast=%b",
+                         cycles, dut.u_l2_cache.m_axi_rlast);
+            end
+            if (dut.u_l2_cache.m_axi_awvalid && dut.u_l2_cache.m_axi_awready) begin
+                $display("[Cycle %0d] [AXI_DRAM] WRITE ADDR HANDSHAKE: awaddr=0x%08h awlen=%0d",
+                         cycles, dut.u_l2_cache.m_axi_awaddr, dut.u_l2_cache.m_axi_awlen);
+            end
+            if (dut.u_l2_cache.m_axi_wvalid && dut.u_l2_cache.m_axi_wready) begin
+                $display("[Cycle %0d] [AXI_DRAM] WRITE DATA HANDSHAKE: wlast=%b",
+                         cycles, dut.u_l2_cache.m_axi_wlast);
+            end
+            if (dut.u_l2_cache.m_axi_bvalid && dut.u_l2_cache.m_axi_bready) begin
+                $display("[Cycle %0d] [AXI_DRAM] WRITE RESP HANDSHAKE: bvalid=1",
+                         cycles);
+            end
+        end
+    end
+
 `ifdef ENABLE_GPU_DEBUG
     reg [31:0] counters [0:PERF_COUNT-1];
     reg [31:0] first_retired;
