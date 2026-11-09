@@ -20,18 +20,16 @@ module fetch_decode (
     decode_if.master decode
 );
 
-    // 1. Instruction Memory (I-RAM)
-    (* ram_style = "block" *) reg [31:0] iram [0:IRAM_DEPTH-1];
-    reg [31:0] fetched_instr;
+    // 0. accept instructions from gpc_control_register broadcast
+    // 1. fetch instructions with issue.pc
+    wire [31:0] fetched_instr;
+    instruction_ram #(.DEPTH(IRAM_DEPTH), .ADDR_W(12)) u_iram (
+        .clk(clk), .write_enable(iram_we),
+        .write_address(iram_waddr), .write_data(iram_wdata),
+        .read_address(issue.pc), .read_data(fetched_instr)
+    );
 
-    always @(posedge clk) begin
-        if (iram_we) begin
-            iram[iram_waddr] <= iram_wdata;
-        end
-        // Implicit 1-cycle latency BRAM read
-        fetched_instr <= iram[issue.pc];
-    end
-
+    // 2. accept issue signals from warp context
     reg issue_valid_q;
     reg [$clog2(MAX_WARPS)-1:0] issue_warp_id_q;
     reg [11:0] issue_pc_q;
