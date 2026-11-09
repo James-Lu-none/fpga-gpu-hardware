@@ -7,7 +7,7 @@ module sp_dpath (
     input wire [11:0] iram_waddr,
     input wire [31:0] iram_wdata,
     issue_if.slave issue,
-    operand_if op,
+    operand_if.master op,
     wb_if.slave wb,
     wb_if.master alu_wb, lsu_wb,
     ctx_wb_if.master ctx_lsu_wb,
@@ -27,6 +27,23 @@ module sp_dpath (
 `endif
 );
     decode_if decode();
+    // This block produces operands for its parent and consumes them locally.
+    // A private interface keeps child slave ports off the output modport.
+    operand_if operands();
+    assign op.valid = operands.valid;
+    assign op.warp_id = operands.warp_id;
+    assign op.pc = operands.pc;
+    assign op.active_mask = operands.active_mask;
+    assign op.block_idx_x = operands.block_idx_x;
+    assign op.block_idx_y = operands.block_idx_y;
+    assign op.thread_id_start = operands.thread_id_start;
+    assign op.opcode = operands.opcode;
+    assign op.rd = operands.rd;
+    assign op.imm = operands.imm;
+    assign op.is_imm = operands.is_imm;
+    assign op.rs1_data = operands.rs1_data;
+    assign op.rs2_data = operands.rs2_data;
+
 
     // 2. Instruction Fetch & Decode
     fetch_decode u_fetch_decode (
@@ -44,7 +61,7 @@ module sp_dpath (
         .clk (clk),
         .rst_n (rst_n),
         .decode (decode),
-        .op (op),
+        .op (operands),
         .wb (wb)
     );
 
@@ -139,7 +156,7 @@ module sp_dpath (
     lsu u_lsu (
         .clk (clk),
         .rst_n (rst_n),
-        .op (op),
+        .op (operands),
         .lsu_ready (lsu_ready),
         
         .l1_req_valid (l1_req_valid),

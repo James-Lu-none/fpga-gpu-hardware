@@ -9,7 +9,7 @@ module sp_ctrl (
     wb_if.slave alu_wb, lsu_wb,
     ctx_wb_if.slave ctx_lsu_wb,
     ctx_wb_if.master ctx_alu_wb,
-    ctx_wb_if ctx_wb,
+    ctx_wb_if.master ctx_wb,
     wb_if.master wb,
     input wire [2:0] lane_nzp [0:NUM_LANES-1],
     output wire [2:0] alu_fn,
@@ -22,6 +22,20 @@ module sp_ctrl (
     output wire [PERF_COUNT-1:0] perf_events
 `endif
 );
+    // Keep the internal producer/consumer interface separate from the output
+    // modport so synthesis can preserve this module boundary.
+    ctx_wb_if ctx_commit();
+    assign ctx_wb.valid = ctx_commit.valid;
+    assign ctx_wb.warp_id = ctx_commit.warp_id;
+    assign ctx_wb.next_pc = ctx_commit.next_pc;
+    assign ctx_wb.is_done = ctx_commit.is_done;
+    assign ctx_wb.is_divergent = ctx_commit.is_divergent;
+    assign ctx_wb.taken_mask = ctx_commit.taken_mask;
+    assign ctx_wb.not_taken_mask = ctx_commit.not_taken_mask;
+    assign ctx_wb.is_sync = ctx_commit.is_sync;
+    assign ctx_wb.is_ssy = ctx_commit.is_ssy;
+    assign ctx_wb.target_pc = ctx_commit.target_pc;
+
     // LSU completions must be queued independently of ALU write-back. A
     // single skid entry is insufficient: while it is full, another LSU
     // response can arrive in the same cycle as an ALU result. Dropping that
@@ -90,16 +104,16 @@ module sp_ctrl (
     assign wb.data    = alu_wb.valid ? alu_wb.data : lsu_wb_data_q[lsu_wb_rd_ptr];
     assign wb.mask    = alu_wb.valid ? alu_wb.mask : lsu_wb_mask_q[lsu_wb_rd_ptr];
     
-    assign ctx_wb.valid          = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.valid : eff_ctx_lsu_wb_valid;
-    assign ctx_wb.warp_id        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.warp_id : lsu_ctx_warp_id_q[lsu_wb_rd_ptr];
-    assign ctx_wb.next_pc        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.next_pc : lsu_ctx_next_pc_q[lsu_wb_rd_ptr];
-    assign ctx_wb.is_done        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_done : 1'b0;
-    assign ctx_wb.taken_mask     = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.taken_mask : 32'd0;
-    assign ctx_wb.not_taken_mask = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.not_taken_mask : 32'd0;
-    assign ctx_wb.is_divergent   = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_divergent : 1'b0;
-    assign ctx_wb.is_sync        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_sync : 1'b0;
-    assign ctx_wb.is_ssy         = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_ssy : 1'b0;
-    assign ctx_wb.target_pc      = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.target_pc : 12'd0;
+    assign ctx_commit.valid          = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.valid : eff_ctx_lsu_wb_valid;
+    assign ctx_commit.warp_id        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.warp_id : lsu_ctx_warp_id_q[lsu_wb_rd_ptr];
+    assign ctx_commit.next_pc        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.next_pc : lsu_ctx_next_pc_q[lsu_wb_rd_ptr];
+    assign ctx_commit.is_done        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_done : 1'b0;
+    assign ctx_commit.taken_mask     = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.taken_mask : 32'd0;
+    assign ctx_commit.not_taken_mask = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.not_taken_mask : 32'd0;
+    assign ctx_commit.is_divergent   = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_divergent : 1'b0;
+    assign ctx_commit.is_sync        = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_sync : 1'b0;
+    assign ctx_commit.is_ssy         = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.is_ssy : 1'b0;
+    assign ctx_commit.target_pc      = alu_wb.valid || ctx_alu_wb.valid ? ctx_alu_wb.target_pc : 12'd0;
 
     // 1. Warp Context & Dynamic Scheduler
     warp_context u_warp_context (
@@ -114,7 +128,7 @@ module sp_ctrl (
         //   different stages simultaneously, as long as they belong to DIFFERENT warps 
         //   (fine-grained multithreading / barrel execution to hide latency).
         .issue (issue),
-        .ctx_wb (ctx_wb)
+        .ctx_wb (ctx_commit)
 `ifdef ENABLE_GPU_DEBUG
         , .perf_clear(perf_clear), .perf_events(perf_events)
 `endif
