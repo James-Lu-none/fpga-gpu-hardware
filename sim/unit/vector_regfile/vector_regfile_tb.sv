@@ -17,7 +17,7 @@ module vector_regfile_tb;
         logic [31:0] cycle;
     } expected_t;
     expected_t pending[$];
-    integer cycle = 0, checks = 0, issued = 0, cancelled = 0;
+    integer cycle = 0, checks = 0, issued = 0, cancelled = 0, stalls = 0;
     always @(posedge clk) begin
         expected_t e;
         cycle = cycle + 1;
@@ -26,6 +26,7 @@ module vector_regfile_tb;
             pending.delete();
         end
         else begin
+            if (decode.valid && !decode.ready) stalls++;
             if (op.valid) begin
                 if (pending.size() == 0) $fatal(1, "Unexpected operand valid");
                 e = pending.pop_front();
@@ -36,7 +37,7 @@ module vector_regfile_tb;
                            e.warp, e.pc, op.rs1_data, e.rs1, op.rs2_data, e.rs2, cycle-e.cycle);
                 checks++;
             end
-            if (decode.valid) begin
+            if (decode.valid && decode.ready) begin
                 e.rs1 = golden[decode.warp_id][decode.rs1];
                 e.rs2 = golden[decode.warp_id][decode.rs2];
                 e.tag = decode.imm;
@@ -104,6 +105,27 @@ module vector_regfile_tb;
         end
         read_stream(1);
         read_stream(0);
+        // Hold one decode across a write burst. Replicated FPGA storage may
+        // accept every cycle; the ASIC 1RW1R bank must wait for write-back.
+        // The scoreboard checks accepted reads only, including the final value
+        // written to the same register before the ASIC read is released.
+        @(negedge clk);
+        decode.valid = 1;
+        decode.warp_id = 0; decode.rs1 = 7; decode.rs2 = 8;
+        decode.pc = 12'h321; decode.imm = 32'h01234567;
+        decode.opcode = 8'ha0; decode.active_mask = 3;
+        wb.valid = 0;
+        @(negedge clk);
+        for (int n = 0; n < 4; n++) begin
+            wb.valid = 1; wb.warp_id = 0; wb.rd = 7; wb.mask = 3;
+            wb.data = {32'hcafef000 | 32'(n), 32'h12345000 | 32'(n)};
+            @(negedge clk);
+        end
+        wb.valid = 0;
+        @(negedge clk);
+        decode.valid = 0;
+        repeat (4) @(negedge clk);
+        if (pending.size() != 0) $fatal(1, "Lost operand across write-back stall");
         // Assert reset between clock edges with a decode in flight. Payload
         // and RAM need no reset, but no pre-reset valid may escape afterward.
         @(negedge clk); decode.valid = 1; decode.rs1 = 1; decode.rs2 = 0;
@@ -121,7 +143,7 @@ module vector_regfile_tb;
         repeat (4) @(negedge clk);
         read_stream(0); // The masked register contents must survive reset.
         if (cancelled != 1) $fatal(1, "Unexpected number of flushed operands");
-        $display("PASS: VRF %0d back-to-back operands; ports, masks, R0, two-cycle alignment, asynchronous valid reset and RAM retention", checks);
+        $display("PASS: VRF %0d operands, %0d stalled cycles; ports, masks, R0, write-back overlap/stalls, two-cycle alignment, asynchronous valid reset and RAM retention", checks, stalls);
         $finish;
     end
     initial begin
