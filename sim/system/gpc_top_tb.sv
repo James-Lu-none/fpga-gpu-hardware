@@ -474,7 +474,7 @@ module gpc_top_tb;
     wire [NUM_SMS*NUM_SUB_PARTITIONS-1:0] observed_issue_pulse, observed_retire_pulse, observed_divergence_pulse;
     for (genvar sm = 0; sm < NUM_SMS; sm++) begin : perf_monitor_sm
         for (genvar sp = 0; sp < NUM_SUB_PARTITIONS; sp++) begin : perf_monitor_sp
-            assign observed_issue_pulse[sm*NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.issue.valid;
+            assign observed_issue_pulse[sm*NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.issue.valid && dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.issue.ready;
             always @(posedge clk) begin
                 if ($test$plusargs("trace_alloc") && dut.gen_sm_array[sm].u_sm.alloc[sp].valid && dut.gen_sm_array[sm].u_sm.alloc[sp].ready)
                     $display("ALLOC sm=%0d sp=%0d group=%0d,%0d", sm, sp,
