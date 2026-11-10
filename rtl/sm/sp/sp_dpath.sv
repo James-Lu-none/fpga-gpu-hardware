@@ -69,8 +69,9 @@ module sp_dpath (
     // Other ALU operations are delayed to the same completion cycle.
     reg [31:0] ex1_add [0:NUM_LANES-1];
     reg [31:0] ex1_sub [0:NUM_LANES-1];
+    reg [31:0] ex1_logic [0:NUM_LANES-1];
     wire [31:0] ex2_mul [0:NUM_LANES-1];
-    reg [31:0] ex2_add [0:NUM_LANES-1], ex2_sub [0:NUM_LANES-1], ex2_special [0:NUM_LANES-1];
+    reg [31:0] ex2_add [0:NUM_LANES-1], ex2_sub [0:NUM_LANES-1], ex2_special [0:NUM_LANES-1], ex2_logic [0:NUM_LANES-1];
     reg [2:0] ex2_fn;
     reg [31:0] ex2_mask;
     reg [31:0] ex1_special [0:NUM_LANES-1];
@@ -99,6 +100,25 @@ module sp_dpath (
         alu_int32 u_add (.fn(3'd0), .a(a), .b(add_b), .result(add_result), .nzp());
         alu_int32 u_sub (.fn(3'd1), .a(a), .b(rs2), .result(sub_result), .nzp());
         alu_int32_mul u_mul (.clk(clk), .a(a), .b(rs2), .result(ex2_mul[k]));
+
+        // Logic & Comparison Operations (AND, OR, XOR, SETCC)
+        wire signed [31:0] s_a = a;
+        wire signed [31:0] s_b = rs2;
+        wire [2:0] s_nzp = {s_a < s_b, s_a == s_b, s_a > s_b};
+        wire [2:0] setcc_cond = op.imm[8:6];
+        wire [31:0] setcc_result = (|(s_nzp & setcc_cond)) ? 32'd1 : 32'd0;
+
+        reg [31:0] logic_result;
+        always @(*) begin
+            case (op.opcode)
+                8'h05: logic_result = a & rs2;
+                8'h06: logic_result = a | rs2;
+                8'h07: logic_result = a ^ rs2;
+                8'h08: logic_result = setcc_result;
+                default: logic_result = 32'd0;
+            endcase
+        end
+
         reg [31:0] special;
         always @(*) begin
             special = 32'd0;
@@ -117,14 +137,17 @@ module sp_dpath (
         always @(posedge clk) begin
             ex1_add[k] <= add_result;
             ex1_sub[k] <= sub_result;
+            ex1_logic[k] <= logic_result;
             ex2_add[k] <= ex1_add[k];
             ex2_sub[k] <= ex1_sub[k];
+            ex2_logic[k] <= ex1_logic[k];
             ex2_special[k] <= ex1_special[k];
             ex1_special[k] <= special;
         end
         assign lane_result[k] = ex2_fn == 3'd0 ? ex2_add[k] :
                                 ex2_fn == 3'd1 ? ex2_sub[k] :
-                                ex2_fn == 3'd2 ? ex2_mul[k] : ex2_special[k];
+                                ex2_fn == 3'd2 ? ex2_mul[k] :
+                                ex2_fn == 3'd3 ? ex2_special[k] : ex2_logic[k];
         assign lane_nzp[k] = {lane_result[k][31], lane_result[k] == 0,
                              !lane_result[k][31] && lane_result[k] != 0};
     end
