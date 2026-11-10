@@ -16,6 +16,9 @@ make -C sim mul32-check
 
 `check` runs the unit regressions and OpenCL workloads. Existing individual
 `vrf-check`, `cache-store-check`, `lsu-reset-check` and `gpc-sim` targets remain.
+The VRF scoreboard accepts requests on `decode.valid && decode.ready` and
+checks two-cycle latency from acceptance, including overlap with write-back.
+Issue performance counters likewise count `valid && ready`, not held requests.
 The multiplier harness and pattern are also used by `../asic/Makefile` for
 RTL and mapped-netlist simulation; ASIC flow configuration stays in `asic/`.
 
