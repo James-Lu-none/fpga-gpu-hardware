@@ -11,7 +11,6 @@ module sp_ctrl (
     ctx_wb_if.master ctx_alu_wb,
     ctx_wb_if.master ctx_wb,
     wb_if.master wb,
-    input wire [2:0] lane_nzp [0:NUM_LANES-1],
     output wire [2:0] alu_fn,
     output wire ex1_writes_reg,
     output reg ex1_valid,
@@ -135,16 +134,20 @@ module sp_ctrl (
     );
 
     // 4. ALU & PC Execution Pipeline
-    localparam OP_ADD  = 8'h01;
-    localparam OP_SUB  = 8'h02;
-    localparam OP_MUL  = 8'h03;
-    localparam OP_CMP  = 8'h04;
-    localparam OP_ADDI = 8'h81;
-    localparam OP_S2R  = 8'hB0;
-    localparam OP_BR   = 8'hC0;
-    localparam OP_SYNC = 8'hE0;
-    localparam OP_SSY  = 8'hE1;
-    localparam OP_EXIT = 8'hFF;
+    localparam OP_ADD   = 8'h01;
+    localparam OP_SUB   = 8'h02;
+    localparam OP_MUL   = 8'h03;
+    localparam OP_CMP   = 8'h04;
+    localparam OP_AND   = 8'h05;
+    localparam OP_OR    = 8'h06;
+    localparam OP_XOR   = 8'h07;
+    localparam OP_SETCC = 8'h08;
+    localparam OP_ADDI  = 8'h81;
+    localparam OP_S2R   = 8'hB0;
+    localparam OP_BR    = 8'hC0;
+    localparam OP_SYNC  = 8'hE0;
+    localparam OP_SSY   = 8'hE1;
+    localparam OP_EXIT  = 8'hFF;
 
     // Warp-level EX1 Stage Registers
     reg [7:0] ex1_opcode;
@@ -178,26 +181,25 @@ module sp_ctrl (
         end
     end
 
-    wire alu_updates_nzp = ex1_valid && (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_CMP);
     wire is_exit   = ex1_valid && (ex1_opcode == OP_EXIT);
     wire is_branch = ex1_valid && (ex1_opcode == OP_BR);
     wire is_sync   = ex1_valid && (ex1_opcode == OP_SYNC);
     wire is_ssy    = ex1_valid && (ex1_opcode == OP_SSY);
-    wire alu_writes_reg = (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_MUL || ex1_opcode == OP_S2R);
+    wire alu_writes_reg = (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_MUL || ex1_opcode == OP_S2R ||
+                           ex1_opcode == OP_AND || ex1_opcode == OP_OR || ex1_opcode == OP_XOR || ex1_opcode == OP_SETCC);
 
 
     // Decode once per warp; all lanes share the same arithmetic function.
     assign alu_fn = (op.opcode == OP_ADD || op.opcode == OP_ADDI) ? 3'd0 :
-                    (op.opcode == OP_SUB || op.opcode == OP_CMP) ? 3'd1 :
-                    (op.opcode == OP_MUL) ? 3'd2 : 3'd3;
+                    (op.opcode == OP_SUB || op.opcode == OP_CMP)  ? 3'd1 :
+                    (op.opcode == OP_MUL)                         ? 3'd2 :
+                    (op.opcode == OP_S2R)                         ? 3'd3 : 3'd4;
     assign ex1_writes_reg = alu_writes_reg;
     // PC Module Instantiation
     pc u_pc (
         .clk             (clk),
         .rst_n           (rst_n),
         .op              (op),
-        .alu_updates_nzp (alu_updates_nzp),
-        .next_nzp        (lane_nzp),
         .is_exit         (is_exit),
         .is_branch       (is_branch),
         .is_sync         (is_sync),

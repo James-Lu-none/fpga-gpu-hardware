@@ -20,8 +20,6 @@ module pc (
     operand_if.slave op,
 
     // From ALU
-    input wire alu_updates_nzp,
-    input wire [2:0] next_nzp [0:NUM_LANES-1],
     input wire is_exit,
     input wire is_branch,
     input wire is_sync,
@@ -31,20 +29,7 @@ module pc (
     ctx_wb_if.master ctx_wb
 );
 
-    // NZP Registers (Condition Codes per Warp, Per Lane)
-    // [2]=N, [1]=Z, [0]=P
-    reg [2:0] warp_nzp [0:MAX_WARPS-1][0:NUM_LANES-1];
-
-    integer i, j;
-    initial begin
-        for (i=0; i<MAX_WARPS; i=i+1) begin
-            for (j=0; j<NUM_LANES; j=j+1) begin
-                warp_nzp[i][j] = 3'b000;
-            end
-        end
-    end
-
-    // Align context retirement and NZP with the two-cycle ALU pipeline.
+    // Align context retirement with the two-cycle ALU pipeline.
     reg [0:0] op_valid_q;
     reg [7:0] op_opcode_q;
     reg [$clog2(MAX_WARPS)-1:0] op_warp_id_q;
@@ -52,6 +37,8 @@ module pc (
     reg [31:0] op_imm_q;
     reg [31:0] op_active_mask_q;
     reg [11:0] op_pc_q;
+    reg [DATA_W-1:0] op_rs1_data_q;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) op_valid_q <= 0;
         else op_valid_q <= op.valid;
@@ -63,6 +50,7 @@ module pc (
         op_imm_q <= op.imm;
         op_active_mask_q <= op.active_mask;
         op_pc_q <= op.pc;
+        op_rs1_data_q <= op.rs1_data;
     end
 
     // Execution Stage 1: Pipeline Registers for Operand Data
@@ -73,6 +61,7 @@ module pc (
     reg [31:0] ex1_imm;
     reg [31:0] ex1_active_mask;
     reg [11:0] ex1_pc;
+    reg [DATA_W-1:0] ex1_rs1_data;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -83,6 +72,7 @@ module pc (
             ex1_imm <= 32'd0;
             ex1_active_mask <= 32'd0;
             ex1_pc <= 12'd0;
+            ex1_rs1_data <= '0;
         end else begin
             ex1_valid <= op_valid_q;
             ex1_opcode <= op_opcode_q;
@@ -91,16 +81,20 @@ module pc (
             ex1_imm <= op_imm_q;
             ex1_active_mask <= op_active_mask_q;
             ex1_pc <= op_pc_q;
+            ex1_rs1_data <= op_rs1_data_q;
         end
     end
 
     // Execution Stage 2: Branch Evaluator (Combinational)
     wire is_lsu = (ex1_opcode == 8'hA0 || ex1_opcode == 8'hA1);
-    wire [2:0] branch_cond = ex1_rd[2:0];
 
+    // Register-based branching:
+    // If rd == 0 (R0): unconditional branch (all active lanes take the branch).
+    // If rd != 0 (R1..R31): lane l branches if VRF[rd][l] != 0.
     wire [NUM_LANES-1:0] branch_take;
     for (genvar l = 0; l < NUM_LANES; l = l + 1) begin : gen_branch_take
-        assign branch_take[l] = ((branch_cond & warp_nzp[ex1_warp_id][l]) != 3'b000) && ex1_active_mask[l];
+        wire lane_cond = (ex1_rd == 5'd0) ? 1'b1 : (ex1_rs1_data[l*32 +: 32] != 32'd0);
+        assign branch_take[l] = lane_cond && ex1_active_mask[l];
     end
     
     wire [31:0] comb_taken_mask = {{(32-NUM_LANES){1'b0}}, branch_take};
@@ -127,14 +121,7 @@ module pc (
 
             // Wait for ex1_valid (since ALU signals also arrive in EX2 based on ex1_valid)
             if (ex1_valid) begin
-                // 1. Update NZP Register
-                if (alu_updates_nzp) begin
-                    for (integer l = 0; l < NUM_LANES; l = l + 1) begin
-                        if (ex1_active_mask[l]) warp_nzp[ex1_warp_id][l] <= next_nzp[l];
-                    end
-                end
-
-                // 2. PC & State Update (Only for non-LSU instructions; LSU handles its own ctx_wb)
+                // PC & State Update (Only for non-LSU instructions; LSU handles its own ctx_wb)
                 if (!is_lsu) begin
                     ctx_wb.valid <= 1'b1;
                     ctx_wb.warp_id <= ex1_warp_id;

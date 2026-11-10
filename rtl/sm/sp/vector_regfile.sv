@@ -25,7 +25,10 @@ module vector_regfile (
     // Duplicate each lane's single-read RAM to provide independent rs1/rs2.
     // Use full 32-bit lane writes in separate RAM instances, rather than two
     // sliced vector memories assigned in the same procedural write loop.
-    wire [7:0] addr_rs1 = {decode.warp_id, decode.rs1};
+    // When executing BR (0xC0), route decode.rd to rs1 read port so op.rs1_data
+    // contains the predicate register for direct register-based branching.
+    wire [4:0] eff_rs1 = (decode.opcode == 8'hC0) ? decode.rd : decode.rs1;
+    wire [7:0] addr_rs1 = {decode.warp_id, eff_rs1};
     wire [7:0] addr_rs2 = {decode.warp_id, decode.rs2};
     wire [7:0] addr_wb = {wb.warp_id, wb.rd};
 
