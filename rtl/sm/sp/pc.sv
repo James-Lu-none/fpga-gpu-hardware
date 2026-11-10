@@ -47,7 +47,7 @@ module pc (
     // Align context retirement and NZP with the two-cycle ALU pipeline.
     reg [0:0] op_valid_q;
     reg [7:0] op_opcode_q;
-    reg [3:0] op_warp_id_q;
+    reg [$clog2(MAX_WARPS)-1:0] op_warp_id_q;
     reg [4:0] op_rd_q;
     reg [31:0] op_imm_q;
     reg [31:0] op_active_mask_q;
@@ -68,7 +68,7 @@ module pc (
     // Execution Stage 1: Pipeline Registers for Operand Data
     reg ex1_valid;
     reg [7:0] ex1_opcode;
-    reg [3:0] ex1_warp_id;
+    reg [$clog2(MAX_WARPS)-1:0] ex1_warp_id;
     reg [4:0] ex1_rd;
     reg [31:0] ex1_imm;
     reg [31:0] ex1_active_mask;
@@ -78,7 +78,7 @@ module pc (
         if (!rst_n) begin
             ex1_valid <= 1'b0;
             ex1_opcode <= 8'd0;
-            ex1_warp_id <= 4'd0;
+            ex1_warp_id <= '0;
             ex1_rd <= 5'd0;
             ex1_imm <= 32'd0;
             ex1_active_mask <= 32'd0;
@@ -110,7 +110,7 @@ module pc (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ctx_wb.valid <= 1'b0;
-            ctx_wb.warp_id <= 4'd0;
+            ctx_wb.warp_id <= '0;
             ctx_wb.next_pc <= 12'd0;
             ctx_wb.is_done <= 1'b0;
             ctx_wb.taken_mask <= 32'd0;

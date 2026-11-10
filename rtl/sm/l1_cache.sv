@@ -58,15 +58,16 @@ module l1_cache (
 
     assign core_bus.req_valid = req_valid;
     assign core_bus.req_addr = req_addr;
-    assign core_bus.req_wdata = {192'd0, req_wdata} << (req_qword * 64);
-    assign core_bus.req_wstrb = {24'd0, req_wstrb} << (req_qword * 8);
+    assign core_bus.req_wdata = 256'({192'd0, req_wdata[63:0]} << (32'(req_qword) * 64));
+    assign core_bus.req_wstrb = 32'({24'd0, req_wstrb} << (32'(req_qword) * 8));
     assign core_bus.req_we = req_we;
     assign req_ready = core_bus.req_ready;
     assign rsp_valid = core_bus.rsp_valid;
-    assign rsp_rdata = (rsp_qword_q == 2'd0) ? core_bus.rsp_rdata[63:0] :
-                       (rsp_qword_q == 2'd1) ? core_bus.rsp_rdata[127:64] :
-                       (rsp_qword_q == 2'd2) ? core_bus.rsp_rdata[191:128] :
-                                                   core_bus.rsp_rdata[255:192];
+    wire [63:0] selected_qword = (rsp_qword_q == 2'd0) ? core_bus.rsp_rdata[63:0] :
+                                 (rsp_qword_q == 2'd1) ? core_bus.rsp_rdata[127:64] :
+                                 (rsp_qword_q == 2'd2) ? core_bus.rsp_rdata[191:128] :
+                                                         core_bus.rsp_rdata[255:192];
+    assign rsp_rdata = DATA_W'(selected_qword);
 
     assign l2_req_valid = l2_bus.req_valid;
     assign l2_req_addr = l2_bus.req_addr;

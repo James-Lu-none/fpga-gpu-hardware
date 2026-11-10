@@ -12,8 +12,9 @@ module instruction_ram #(
     output reg [31:0] read_data
 );
     (* ram_style = "block" *) reg [31:0] words [0:DEPTH-1];
+    localparam integer RAM_ADDR_W = $clog2(DEPTH);
     always @(posedge clk) begin
-        if (write_enable) words[write_address] <= write_data;
-        read_data <= words[read_address];
+        if (write_enable) words[write_address[RAM_ADDR_W-1:0]] <= write_data;
+        read_data <= words[read_address[RAM_ADDR_W-1:0]];
     end
 endmodule

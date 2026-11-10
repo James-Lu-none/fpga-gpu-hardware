@@ -288,7 +288,7 @@ module streaming_multiprocessor #(
                 client_found = 1'b0;
                 for (int c = 0; c < NUM_SPS; c = c + 1) begin
                     int idx;
-                    idx = (rr_ptr + c) % NUM_SPS;
+                    idx = (32'(rr_ptr) + c) % NUM_SPS;
                     if (!client_found && sp_l1_req_valid[idx]) begin
                         sel_client   = idx[$clog2(NUM_SPS)-1:0];
                         client_found = 1'b1;
@@ -318,7 +318,7 @@ module streaming_multiprocessor #(
                         ARB_IDLE: begin
                             if (client_found && l1_req_ready_int) begin
                                 current_client <= sel_client;
-                                rr_ptr         <= (sel_client + 1) % NUM_SPS;
+                                rr_ptr         <= $clog2(NUM_SPS)'((32'(sel_client) + 1) % NUM_SPS);
                                 arb_state      <= ARB_BUSY;
                             end
                         end

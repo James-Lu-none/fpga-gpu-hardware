@@ -257,12 +257,12 @@ module gpc_top_tb;
                 end
 
                 // alloc_target_sp
-                if (dut.gen_sm_array[sm].u_sm.alloc_target_sp != prev_alloc_target_sp) begin
+                if (int'(dut.gen_sm_array[sm].u_sm.alloc_target_sp) != prev_alloc_target_sp) begin
                     $display("[Cycle %0d] [ALLOC_TARGET] SM%0d: alloc_target_sp changed SP%0d -> SP%0d (max_free_slots=%0d)",
                              cycles, sm, prev_alloc_target_sp,
                              dut.gen_sm_array[sm].u_sm.alloc_target_sp,
                              dut.gen_sm_array[sm].u_sm.max_free_slots);
-                    prev_alloc_target_sp <= dut.gen_sm_array[sm].u_sm.alloc_target_sp;
+                    prev_alloc_target_sp <= int'(dut.gen_sm_array[sm].u_sm.alloc_target_sp);
                 end
 
                 // l1_req_valid_int
@@ -556,7 +556,7 @@ module gpc_top_tb;
             end else if (!$feof(fd)) $fatal(1, "Malformed kernel");
         end
         $fclose(fd);
-        if (!count) $fatal(1, "Empty kernel");
+        if (count == 0) $fatal(1, "Empty kernel");
         // Existing I-RAM aperture is write-only; reads return zero.
         lite_read(32'h1000, status);
         if (status != 0) $fatal(1, "Unexpected I-RAM read response");
@@ -572,7 +572,7 @@ module gpc_top_tb;
         lite_write(32'h00, 1);
         do lite_read(32'h04, status); while (!status[0]);
         if (!irq || busy) $fatal(1, "Invalid GPC completion state");
-        if (!reads || !writes) $fatal(1, "Kernel did not exercise AXI VRAM reads/writes");
+        if (reads == 0 || writes == 0) $fatal(1, "Kernel did not exercise AXI VRAM reads/writes");
         lite_write(32'h08, 1);
         lite_read(32'h04, status);
         if (status != 0 || irq) $fatal(1, "INT_ACK did not clear completion");

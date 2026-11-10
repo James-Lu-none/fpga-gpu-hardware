@@ -46,30 +46,32 @@ module thread_block_scheduler (
     localparam STATE_WAIT_ACK = 2'd2;
     localparam STATE_WAIT_DONE = 2'd3;
 
+    localparam SM_IDX_W = (NUM_SMS > 1) ? $clog2(NUM_SMS) : 1;
+
     reg [1:0] state;
     reg [15:0] current_block_x;
     reg [15:0] current_block_y;
     reg [31:0] threads_per_block;
     reg [4:0] warps_per_block;
-    reg [3:0] chosen_sm_idx;
+    reg [SM_IDX_W-1:0] chosen_sm_idx;
 
     assign busy = (state != STATE_IDLE);
 
     // Arbitration / Selection Logic (Combinational)
     reg [4:0] max_slots;
-    reg [3:0] best_sm;
+    reg [SM_IDX_W-1:0] best_sm;
     reg sm_found;
     integer j;
 
     always @(*) begin
         max_slots = 0;
-        best_sm = 0;
+        best_sm = '0;
         sm_found = 1'b0;
         
         for (j = 0; j < NUM_SMS; j = j + 1) begin
             if (sm_slots[j] >= warps_per_block && sm_slots[j] > max_slots) begin
                 max_slots = sm_slots[j];
-                best_sm = j;
+                best_sm = SM_IDX_W'(j);
                 sm_found = 1'b1;
             end
         end
@@ -83,7 +85,7 @@ module thread_block_scheduler (
             state <= STATE_IDLE;
             grid_done <= 1'b0;
             sm_block_issue_valid <= {NUM_SMS{1'b0}};
-            chosen_sm_idx <= 0;
+            chosen_sm_idx <= '0;
         end else begin
             case (state)
                 STATE_IDLE: begin
@@ -93,7 +95,7 @@ module thread_block_scheduler (
                         current_block_y <= 0;
                         // Calculate warps per block: ceil(threads / WARP_SIZE)
                         threads_per_block = block_dim_x * block_dim_y;
-                        warps_per_block <= (threads_per_block + WARP_SIZE - 1) / WARP_SIZE;
+                        warps_per_block <= 5'((threads_per_block + WARP_SIZE - 1) / WARP_SIZE);
                         state <= STATE_ISSUE;
                     end
                 end
@@ -104,7 +106,7 @@ module thread_block_scheduler (
                         sm_block_issue_valid[best_sm] <= 1'b1;
                         sm_block_idx_x <= current_block_x;
                         sm_block_idx_y <= current_block_y;
-                        sm_warps_per_block <= warps_per_block;
+                        sm_warps_per_block <= 10'(warps_per_block);
                         chosen_sm_idx <= best_sm;
                         state <= STATE_WAIT_ACK;
                     end

@@ -49,18 +49,18 @@ module warp_context (
     reg [2:0] simt_sp [0:MAX_WARPS-1];
 
     // Find the first FREE warp slot
-    reg [3:0] free_warp_idx;
+    reg [$clog2(MAX_WARPS)-1:0] free_warp_idx;
     reg has_free_warp;
     integer i;
 
     always @(*) begin
         has_free_warp = 1'b0;
-        free_warp_idx = 4'd0;
+        free_warp_idx = '0;
         alloc.available_slots = 5'd0;
         for (i = MAX_WARPS-1; i >= 0; i = i - 1) begin
             if (warp_state[i] == STATE_FREE || warp_state[i] == STATE_DONE) begin
                 has_free_warp = 1'b1;
-                free_warp_idx = i; // Will find the lowest index because loop counts down
+                free_warp_idx = $clog2(MAX_WARPS)'(i); // Will find the lowest index because loop counts down
                 alloc.available_slots = alloc.available_slots + 1;
             end
         end
@@ -69,14 +69,14 @@ module warp_context (
     assign alloc.ready = has_free_warp;
 
     // Round-Robin Scheduler State
-    reg [3:0] rr_idx;
+    reg [$clog2(MAX_WARPS)-1:0] rr_idx;
 
     // Main Context Update & Scheduler Block
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            rr_idx <= 4'd0;
+            rr_idx <= '0;
             issue.valid <= 1'b0;
-            issue.warp_id <= 4'd0;
+            issue.warp_id <= '0;
             issue.pc <= 12'd0;
             issue.active_mask <= 32'd0;
             issue.block_idx_x <= 16'd0;
@@ -110,7 +110,7 @@ module warp_context (
                 end else if (ctx_wb.is_ssy) begin
                     // SSY: Push Reconvergence PC and current mask to stack
                     if (simt_sp[ctx_wb.warp_id] < 3'd4) begin
-                        simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id]] <= {ctx_wb.target_pc, warp_mask[ctx_wb.warp_id]};
+                        simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id][1:0]] <= {ctx_wb.target_pc, warp_mask[ctx_wb.warp_id]};
                         simt_sp[ctx_wb.warp_id] <= simt_sp[ctx_wb.warp_id] + 3'd1;
                     end
                     warp_pc[ctx_wb.warp_id] <= ctx_wb.next_pc;
@@ -118,7 +118,7 @@ module warp_context (
                 end else if (ctx_wb.is_divergent) begin
                     // Divergence: Push Not_Taken path to Stack
                     if (simt_sp[ctx_wb.warp_id] < 3'd4) begin
-                        simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id]] <= {warp_pc[ctx_wb.warp_id] + 12'd1, ctx_wb.not_taken_mask};
+                        simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id][1:0]] <= {warp_pc[ctx_wb.warp_id] + 12'd1, ctx_wb.not_taken_mask};
                         simt_sp[ctx_wb.warp_id] <= simt_sp[ctx_wb.warp_id] + 3'd1;
                     end
                     // Continue with Taken path
@@ -129,8 +129,8 @@ module warp_context (
                     // Pop from Stack
                     if (simt_sp[ctx_wb.warp_id] > 3'd0) begin
                         // There is a path on the stack, pop it
-                        warp_pc[ctx_wb.warp_id] <= simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id] - 1][43:32];
-                        warp_mask[ctx_wb.warp_id] <= simt_stack[ctx_wb.warp_id][simt_sp[ctx_wb.warp_id] - 1][31:0];
+                        warp_pc[ctx_wb.warp_id] <= simt_stack[ctx_wb.warp_id][2'(simt_sp[ctx_wb.warp_id] - 3'd1)][43:32];
+                        warp_mask[ctx_wb.warp_id] <= simt_stack[ctx_wb.warp_id][2'(simt_sp[ctx_wb.warp_id] - 3'd1)][31:0];
                         simt_sp[ctx_wb.warp_id] <= simt_sp[ctx_wb.warp_id] - 3'd1;
                         warp_state[ctx_wb.warp_id] <= STATE_READY;
                     end else begin
@@ -149,15 +149,17 @@ module warp_context (
             // Look for a READY warp starting from rr_idx
             // Simplified combinational scan for 16 warps
             begin : rr_scheduler
-                reg [3:0] next_idx;
+                reg [$clog2(MAX_WARPS)-1:0] next_idx;
                 reg found;
                 found = 1'b0;
                 next_idx = rr_idx;
                 
                 for (integer k = 0; k < MAX_WARPS; k = k + 1) begin
-                    if (!found && warp_state[(rr_idx + k) % MAX_WARPS] == STATE_READY) begin
+                    logic [$clog2(MAX_WARPS)-1:0] cand_idx;
+                    cand_idx = $clog2(MAX_WARPS)'((32'(rr_idx) + k) % MAX_WARPS);
+                    if (!found && warp_state[cand_idx] == STATE_READY) begin
                         found = 1'b1;
-                        next_idx = (rr_idx + k) % MAX_WARPS;
+                        next_idx = cand_idx;
                     end
                 end
     
@@ -175,7 +177,7 @@ module warp_context (
                     warp_state[next_idx] <= STATE_STALL;
                     
                     // Move Round-Robin index to next warp
-                    rr_idx <= (next_idx + 1) % MAX_WARPS;
+                    rr_idx <= $clog2(MAX_WARPS)'((32'(next_idx) + 1) % MAX_WARPS);
                 end else begin
                     issue.valid <= 1'b0;
                 end

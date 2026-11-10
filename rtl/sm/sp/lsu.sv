@@ -134,7 +134,7 @@ module lsu (
                 fifo_mask[fifo_wr_ptr] <= op.active_mask;
                 fifo_addr[fifo_wr_ptr] <= op.active_mask[0] ? op.rs1_data[31:0] : op.rs1_data[63:32];
                 fifo_lane1_addr[fifo_wr_ptr] <= op.rs1_data[63:32];
-                fifo_wdata[fifo_wr_ptr] <= op.active_mask[0] ? op.rs2_data : {op.rs2_data[63:32], op.rs2_data[63:32]};
+                fifo_wdata[fifo_wr_ptr] <= op.active_mask[0] ? op.rs2_data : DATA_W'({op.rs2_data[63:32], op.rs2_data[63:32]});
                 fifo_is_uniform[fifo_wr_ptr] <= is_uniform || op.active_mask[1:0] != 2'b11;
                 fifo_word_sel[fifo_wr_ptr] <= op.active_mask[0] ? word_sel : op.rs1_data[34];
                 fifo_lane1_word_sel[fifo_wr_ptr] <= op.rs1_data[34];
@@ -169,7 +169,7 @@ module lsu (
 
                         l1_req_valid <= 1'b1;
                         l1_req_addr <= fifo_addr[fifo_rd_ptr];
-                        l1_req_wdata <= {fifo_wdata[fifo_rd_ptr][31:0], fifo_wdata[fifo_rd_ptr][31:0]};
+                        l1_req_wdata <= DATA_W'({fifo_wdata[fifo_rd_ptr][31:0], fifo_wdata[fifo_rd_ptr][31:0]});
                         l1_req_we <= !fifo_is_load[fifo_rd_ptr];
                         l1_req_wstrb <= fifo_word_sel[fifo_rd_ptr] ? 8'hF0 : 8'h0F;
                         state <= ST_ISSUE;
@@ -202,7 +202,7 @@ module lsu (
 
                             l1_req_valid <= 1'b1;
                             l1_req_addr <= lane1_addr;
-                            l1_req_wdata <= {lane1_wdata, lane1_wdata};
+                            l1_req_wdata <= DATA_W'({lane1_wdata, lane1_wdata});
                             l1_req_we <= !active_is_load;
                             l1_req_wstrb <= active_lane1_word_sel ? 8'hF0 : 8'h0F;
                             active_word_sel <= active_lane1_word_sel;
@@ -237,10 +237,10 @@ module lsu (
             if (active_lane1_pending)
                 lane0_rdata <= active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0];
             else if (active_is_uniform)
-                wb.data <= active_word_sel ? {l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]} :
-                                            {l1_rsp_rdata[31:0], l1_rsp_rdata[31:0]};
+                wb.data <= active_word_sel ? DATA_W'({l1_rsp_rdata[63:32], l1_rsp_rdata[63:32]}) :
+                                             DATA_W'({l1_rsp_rdata[31:0], l1_rsp_rdata[31:0]});
             else
-                wb.data <= {active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0], lane0_rdata};
+                wb.data <= DATA_W'({active_word_sel ? l1_rsp_rdata[63:32] : l1_rsp_rdata[31:0], lane0_rdata});
         end
     end
 
