@@ -509,10 +509,8 @@ module gpc_top_tb;
             counters[PERF_WARP_DONE] != 32'(grid_x*grid_y)) $fatal(1, "Counter issue/retire/warp totals mismatch");
         if (counters[PERF_L1_REQ] != counters[PERF_L1_HIT]+counters[PERF_L1_MISS] ||
             counters[PERF_L2_REQ] != counters[PERF_L2_HIT]+counters[PERF_L2_MISS] ||
-            counters[PERF_L1_REQ] == 0 || counters[PERF_L2_REQ] == 0 ||
-            counters[PERF_LSU_FIFO_PUSH] != counters[PERF_LSU_FIFO_POP] ||
-            counters[PERF_LSU_FIFO_PUSH] == 0 || counters[PERF_WARP_SWAP] >= counters[PERF_WARP_ISSUE])
-            $fatal(1, "Counter cache/FIFO/swap invariants mismatch");
+            counters[PERF_L1_REQ] == 0 || counters[PERF_L2_REQ] == 0)
+            $fatal(1, "Counter cache invariants mismatch");
         repeat (20) @(negedge clk);
         for (int c = 0; c < PERF_COUNT; c++) begin
             lite_read(32'h30+32'(c*4), saved);
@@ -591,22 +589,17 @@ module gpc_top_tb;
         $fwrite(counter_fd, "cycle_count: %0d\n", counters[0]);
         $fwrite(counter_fd, "inst_retired_count: %0d\n", counters[1]);
         $fwrite(counter_fd, "warp_issue_count: %0d\n", counters[2]);
-        $fwrite(counter_fd, "warp_swap_count: %0d\n", counters[3]);
-        $fwrite(counter_fd, "l1_req_count: %0d\n", counters[4]);
-        $fwrite(counter_fd, "l1_hit_count: %0d\n", counters[5]);
-        $fwrite(counter_fd, "l1_miss_count: %0d\n", counters[6]);
-        $fwrite(counter_fd, "l2_req_count: %0d\n", counters[7]);
-        $fwrite(counter_fd, "l2_hit_count: %0d\n", counters[8]);
-        $fwrite(counter_fd, "l2_miss_count: %0d\n", counters[9]);
-        $fwrite(counter_fd, "lsu_fifo_push_count: %0d\n", counters[10]);
-        $fwrite(counter_fd, "lsu_fifo_pop_count: %0d\n", counters[11]);
-        $fwrite(counter_fd, "simt_stack_push_count: %0d\n", counters[12]);
-        $fwrite(counter_fd, "simt_stack_pop_count: %0d\n", counters[13]);
-        $fwrite(counter_fd, "lsu_wait_cycles_count: %0d\n", counters[14]);
-        $fwrite(counter_fd, "lsu_fifo_full_cycles_count: %0d\n", counters[15]);
-        $fwrite(counter_fd, "axi_read_stall_cycles_count: %0d\n", counters[16]);
-        $fwrite(counter_fd, "axi_write_stall_cycles_count: %0d\n", counters[17]);
-        $fwrite(counter_fd, "warp_done_count: %0d\n", counters[18]);
+        $fwrite(counter_fd, "l1_req_count: %0d\n", counters[3]);
+        $fwrite(counter_fd, "l1_hit_count: %0d\n", counters[4]);
+        $fwrite(counter_fd, "l1_miss_count: %0d\n", counters[5]);
+        $fwrite(counter_fd, "l2_req_count: %0d\n", counters[6]);
+        $fwrite(counter_fd, "l2_hit_count: %0d\n", counters[7]);
+        $fwrite(counter_fd, "l2_miss_count: %0d\n", counters[8]);
+        $fwrite(counter_fd, "lsu_wait_cycles_count: %0d\n", counters[9]);
+        $fwrite(counter_fd, "lsu_fifo_full_cycles_count: %0d\n", counters[10]);
+        $fwrite(counter_fd, "axi_read_stall_cycles_count: %0d\n", counters[11]);
+        $fwrite(counter_fd, "axi_write_stall_cycles_count: %0d\n", counters[12]);
+        $fwrite(counter_fd, "warp_done_count: %0d\n", counters[13]);
         $fclose(counter_fd);
         lite_write(32'h08, 1);
         lite_write(32'h2c, 1);

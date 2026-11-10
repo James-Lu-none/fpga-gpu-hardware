@@ -247,8 +247,6 @@ module lsu (
 `ifdef ENABLE_GPU_DEBUG
     always_comb begin
         perf_events = '0;
-        perf_events[PERF_LSU_FIFO_PUSH] = fifo_push;
-        perf_events[PERF_LSU_FIFO_POP] = fifo_pop;
         perf_events[PERF_LSU_WAIT_CYCLES] = state == ST_WAIT;
         perf_events[PERF_LSU_FIFO_FULL_CYCLES] = fifo_count == FIFO_DEPTH;
     end

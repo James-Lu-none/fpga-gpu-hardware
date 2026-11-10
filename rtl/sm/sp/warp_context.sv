@@ -185,29 +185,11 @@ module warp_context (
 
 
 `ifdef ENABLE_GPU_DEBUG
-    reg previous_issue_valid;
-    reg [$clog2(MAX_WARPS)-1:0] previous_warp;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            previous_issue_valid <= 0;
-            previous_warp <= 0;
-        end else if (perf_clear) begin
-            previous_issue_valid <= 0;
-        end else if (issue.valid) begin
-            previous_issue_valid <= 1;
-            previous_warp <= issue.warp_id;
-        end
-    end
     always_comb begin
         perf_events = '0;
         perf_events[PERF_INST_RETIRED] = ctx_wb.valid;
         perf_events[PERF_WARP_ISSUE] = issue.valid;
-        perf_events[PERF_WARP_SWAP] = issue.valid && previous_issue_valid && issue.warp_id != previous_warp;
         perf_events[PERF_WARP_DONE] = ctx_wb.valid && ctx_wb.is_done;
-        perf_events[PERF_SIMT_STACK_PUSH] = ctx_wb.valid && !ctx_wb.is_done &&
-            (ctx_wb.is_ssy || ctx_wb.is_divergent) && simt_sp[ctx_wb.warp_id] < 4;
-        perf_events[PERF_SIMT_STACK_POP] = ctx_wb.valid && !ctx_wb.is_done &&
-            !ctx_wb.is_ssy && !ctx_wb.is_divergent && ctx_wb.is_sync && simt_sp[ctx_wb.warp_id] > 0;
     end
 `endif
 endmodule
