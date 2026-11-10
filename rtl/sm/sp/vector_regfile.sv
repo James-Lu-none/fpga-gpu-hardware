@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 // SIMT vector register file: two read ports and one masked write-back port.
-// Each lane has duplicated synchronous RAM banks for rs1 and rs2. R0 reads
+// Each lane's storage supplies ready and two synchronous read outputs. R0 reads
 // as zero and ignores write-back. BRAM read and operand capture take two
 // cycles; only valid is reset, while RAM and payload registers retain data.
 
@@ -22,9 +22,8 @@ module vector_regfile (
     // One register entry per warp/register pair.
     localparam RAM_DEPTH = MAX_WARPS * NUM_REGS;
 
-    // Duplicate each lane's single-read RAM to provide independent rs1/rs2.
-    // Use full 32-bit lane writes in separate RAM instances, rather than two
-    // sliced vector memories assigned in the same procedural write loop.
+    // The storage implementation selects replicated FPGA RAM or a shared ASIC
+    // macro. A read is accepted only when every lane's storage is available.
     // When executing BR (0xC0), route decode.rd to rs1 read port so op.rs1_data
     // contains the predicate register for direct register-based branching.
     wire [4:0] eff_rs1 = (decode.opcode == 8'hC0) ? decode.rd : decode.rs1;
@@ -34,6 +33,9 @@ module vector_regfile (
 
     wire [DATA_W-1:0] rs1_data_read;
     wire [DATA_W-1:0] rs2_data_read;
+    wire [NUM_LANES-1:0] lane_read_ready;
+    assign decode.ready = rst_n && (&lane_read_ready);
+    wire read_accept = decode.valid && decode.ready;
 
     // Pipeline registers for control signals
     reg [7:0] addr_rs1_q, addr_rs2_q;
@@ -51,15 +53,12 @@ module vector_regfile (
 
     for (genvar lane = 0; lane < NUM_LANES; lane++) begin : gen_lane_ram
         wire lane_write_enable = wb.valid && (wb.rd != 5'd0) && wb.mask[lane];
-        vector_regfile_ram #(.DEPTH(RAM_DEPTH), .ADDR_W(8)) u_rs1 (
+        vector_regfile_ram #(.DEPTH(RAM_DEPTH), .ADDR_W(8)) memory (
             .clk(clk), .write_enable(lane_write_enable),
             .write_address(addr_wb), .write_data(wb.data[lane*32 +: 32]),
-            .read_address(addr_rs1), .read_data(rs1_data_read[lane*32 +: 32])
-        );
-        vector_regfile_ram #(.DEPTH(RAM_DEPTH), .ADDR_W(8)) u_rs2 (
-            .clk(clk), .write_enable(lane_write_enable),
-            .write_address(addr_wb), .write_data(wb.data[lane*32 +: 32]),
-            .read_address(addr_rs2), .read_data(rs2_data_read[lane*32 +: 32])
+            .read_enable(read_accept), .read_ready(lane_read_ready[lane]),
+            .read_address1(addr_rs1), .read_data1(rs1_data_read[lane*32 +: 32]),
+            .read_address2(addr_rs2), .read_data2(rs2_data_read[lane*32 +: 32])
         );
     end
 
@@ -67,24 +66,26 @@ module vector_regfile (
     // into this block produces Vivado Synth 8-7137 set/reset-priority warnings.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) decode_valid_q <= 1'b0;
-        else decode_valid_q <= decode.valid;
+        else decode_valid_q <= read_accept;
     end
 
     // Match the synchronous BRAM read with one cycle of address/metadata.
-    // Payload may advance during reset; cleared valid prevents its use.
+    // Hold metadata while decode is blocked; only accepted reads advance it.
     always @(posedge clk) begin
-        addr_rs1_q <= addr_rs1;
-        addr_rs2_q <= addr_rs2;
-        decode_warp_id_q <= decode.warp_id;
-        decode_pc_q <= decode.pc;
-        decode_active_mask_q <= decode.active_mask;
-        decode_opcode_q <= decode.opcode;
-        decode_rd_q <= decode.rd;
-        decode_imm_q <= decode.imm;
-        decode_is_imm_q <= decode.is_imm;
-        decode_block_idx_x_q <= decode.block_idx_x;
-        decode_block_idx_y_q <= decode.block_idx_y;
-        decode_thread_id_start_q <= decode.thread_id_start;
+        if (read_accept) begin
+            addr_rs1_q <= addr_rs1;
+            addr_rs2_q <= addr_rs2;
+            decode_warp_id_q <= decode.warp_id;
+            decode_pc_q <= decode.pc;
+            decode_active_mask_q <= decode.active_mask;
+            decode_opcode_q <= decode.opcode;
+            decode_rd_q <= decode.rd;
+            decode_imm_q <= decode.imm;
+            decode_is_imm_q <= decode.is_imm;
+            decode_block_idx_x_q <= decode.block_idx_x;
+            decode_block_idx_y_q <= decode.block_idx_y;
+            decode_thread_id_start_q <= decode.thread_id_start;
+        end
     end
 
     // Operand stage: isolate BRAM clock-to-output and R0 selection from
