@@ -71,7 +71,6 @@ module sub_partition (
     wire ex1_valid, ex1_writes_reg;
     wire [$clog2(MAX_WARPS)-1:0] ex1_warp_id;
     wire [4:0] ex1_rd;
-    wire [2:0] lane_nzp [0:NUM_LANES-1];
 
     sp_ctrl u_sp_ctrl (
         .clk(clk),
@@ -85,7 +84,6 @@ module sub_partition (
         .ctx_alu_wb(ctx_alu_wb),
         .ctx_wb(ctx_wb),
         .wb(wb),
-        .lane_nzp(lane_nzp),
         .alu_fn(alu_fn),
         .ex1_valid(ex1_valid),
         .ex1_writes_reg(ex1_writes_reg),
@@ -112,7 +110,6 @@ module sub_partition (
         .ex1_writes_reg(ex1_writes_reg),
         .ex1_warp_id(ex1_warp_id),
         .ex1_rd(ex1_rd),
-        .lane_nzp(lane_nzp),
         .l1_req_valid(l1_req_valid),
         .l1_req_addr(l1_req_addr),
         .l1_req_wdata(l1_req_wdata),

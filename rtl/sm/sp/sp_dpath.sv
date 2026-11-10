@@ -15,7 +15,6 @@ module sp_dpath (
     input wire ex1_valid, ex1_writes_reg,
     input wire [$clog2(MAX_WARPS)-1:0] ex1_warp_id,
     input wire [4:0] ex1_rd,
-    output wire [2:0] lane_nzp [0:NUM_LANES-1],
     output wire l1_req_valid, l1_req_we,
     output wire [31:0] l1_req_addr,
     output wire [DATA_W-1:0] l1_req_wdata,
@@ -148,8 +147,6 @@ module sp_dpath (
                                 ex2_fn == 3'd1 ? ex2_sub[k] :
                                 ex2_fn == 3'd2 ? ex2_mul[k] :
                                 ex2_fn == 3'd3 ? ex2_special[k] : ex2_logic[k];
-        assign lane_nzp[k] = {lane_result[k][31], lane_result[k] == 0,
-                             !lane_result[k][31] && lane_result[k] != 0};
     end
     // EX3 Stage: Vector Write-Back Assembly
     always @(posedge clk or negedge rst_n) begin

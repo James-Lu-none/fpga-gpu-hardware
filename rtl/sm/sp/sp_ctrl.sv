@@ -11,7 +11,6 @@ module sp_ctrl (
     ctx_wb_if.master ctx_alu_wb,
     ctx_wb_if.master ctx_wb,
     wb_if.master wb,
-    input wire [2:0] lane_nzp [0:NUM_LANES-1],
     output wire [2:0] alu_fn,
     output wire ex1_writes_reg,
     output reg ex1_valid,
@@ -182,8 +181,6 @@ module sp_ctrl (
         end
     end
 
-    wire alu_updates_nzp = ex1_valid && (ex1_opcode == OP_ADD || ex1_opcode == OP_ADDI || ex1_opcode == OP_SUB || ex1_opcode == OP_CMP ||
-                                         ex1_opcode == OP_AND || ex1_opcode == OP_OR || ex1_opcode == OP_XOR || ex1_opcode == OP_SETCC);
     wire is_exit   = ex1_valid && (ex1_opcode == OP_EXIT);
     wire is_branch = ex1_valid && (ex1_opcode == OP_BR);
     wire is_sync   = ex1_valid && (ex1_opcode == OP_SYNC);
@@ -203,8 +200,6 @@ module sp_ctrl (
         .clk             (clk),
         .rst_n           (rst_n),
         .op              (op),
-        .alu_updates_nzp (alu_updates_nzp),
-        .next_nzp        (lane_nzp),
         .is_exit         (is_exit),
         .is_branch       (is_branch),
         .is_sync         (is_sync),
