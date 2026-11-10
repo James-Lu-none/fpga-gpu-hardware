@@ -51,16 +51,28 @@ module gpc_top #(
     wire perf_clear;
     wire [31:0] sm_perf_increments [0:NUM_SM_INST-1][0:PERF_COUNT-1];
     wire [PERF_COUNT-1:0] l2_perf_events;
-    reg [31:0] perf_increments [0:PERF_COUNT-1];
+    reg [31:0] perf_increments_comb [0:PERF_COUNT-1];
     always_comb begin
         for (int c = 0; c < PERF_COUNT; c++) begin
-            perf_increments[c] = 32'(l2_perf_events[c]);
+            perf_increments_comb[c] = 32'(l2_perf_events[c]);
             for (int sm = 0; sm < NUM_SM_INST; sm++)
-                perf_increments[c] = perf_increments[c] + sm_perf_increments[sm][c];
+                perf_increments_comb[c] = perf_increments_comb[c] + sm_perf_increments[sm][c];
         end
-        perf_increments[PERF_AXI_READ_STALL_CYCLES] = 32'(m_axi_gmem.arvalid && !m_axi_gmem.arready);
-        perf_increments[PERF_AXI_WRITE_STALL_CYCLES] = 32'((m_axi_gmem.awvalid && !m_axi_gmem.awready) ||
+        perf_increments_comb[PERF_AXI_READ_STALL_CYCLES] = 32'(m_axi_gmem.arvalid && !m_axi_gmem.arready);
+        perf_increments_comb[PERF_AXI_WRITE_STALL_CYCLES] = 32'((m_axi_gmem.awvalid && !m_axi_gmem.awready) ||
             (m_axi_gmem.wvalid && !m_axi_gmem.wready));
+    end
+
+    // Pipeline register: register perf_increments crossing from GPC to gpc_control_register
+    reg [31:0] perf_increments [0:PERF_COUNT-1];
+    always @(posedge clk or negedge gpc_rst_n) begin
+        if (!gpc_rst_n) begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+        end else if (perf_clear) begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+        end else begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
+        end
     end
 `endif
     gpc_control_register u_gpc_ctrl (

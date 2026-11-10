@@ -222,22 +222,41 @@ module gpc_control_register (
 `ifdef ENABLE_GPU_DEBUG
     reg [31:0] perf_counters [0:gpu_pkg::PERF_COUNT-1];
     reg perf_running;
+    reg perf_running_d1, perf_running_d2;
     wire manual_clear = aw_done && w_done && !axi_bvalid &&
         !latched_awaddr[12] && latched_awaddr[11:0] == 12'h02c && latched_wstrb[0] && latched_wdata[0];
     assign perf_clear = hw_trigger || manual_clear;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            perf_running <= 0;
+            perf_running    <= 0;
+            perf_running_d1 <= 0;
+            perf_running_d2 <= 0;
             for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
         end else begin
-            if (hw_trigger) perf_running <= 1;
-            else if (grid_done_status) perf_running <= 0;
+            if (manual_clear) begin
+                perf_running    <= 0;
+                perf_running_d1 <= 0;
+                perf_running_d2 <= 0;
+            end else if (hw_trigger) begin
+                perf_running    <= 1;
+                perf_running_d1 <= 0;
+                perf_running_d2 <= 0;
+            end else begin
+                if (grid_done_status) perf_running <= 0;
+                perf_running_d1 <= perf_running;
+                perf_running_d2 <= perf_running_d1;
+            end
+
             if (perf_clear) begin
                 for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
-            end else if (perf_running) begin
-                for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) begin
-                    if (c == gpu_pkg::PERF_CYCLE) perf_counters[c] <= perf_counters[c] + 1;
-                    else perf_counters[c] <= perf_counters[c] + perf_increments[c];
+            end else begin
+                if (perf_running) begin
+                    perf_counters[gpu_pkg::PERF_CYCLE] <= perf_counters[gpu_pkg::PERF_CYCLE] + 1;
+                end
+                if (perf_running_d2) begin
+                    for (int c = 1; c < gpu_pkg::PERF_COUNT; c++) begin
+                        perf_counters[c] <= perf_counters[c] + perf_increments[c];
+                    end
                 end
             end
         end

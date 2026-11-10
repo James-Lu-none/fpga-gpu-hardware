@@ -192,11 +192,22 @@ module streaming_multiprocessor #(
 `ifdef ENABLE_GPU_DEBUG
     wire [PERF_COUNT-1:0] sp_perf_events [0:NUM_SPS-1];
     wire [PERF_COUNT-1:0] l1_perf_events;
+    reg [31:0] perf_increments_comb [0:PERF_COUNT-1];
     always_comb begin
         for (int c = 0; c < PERF_COUNT; c++) begin
-            perf_increments[c] = 32'(l1_perf_events[c]);
+            perf_increments_comb[c] = 32'(l1_perf_events[c]);
             for (int sp = 0; sp < NUM_SPS; sp++)
-                perf_increments[c] = perf_increments[c] + 32'(sp_perf_events[sp][c]);
+                perf_increments_comb[c] = perf_increments_comb[c] + 32'(sp_perf_events[sp][c]);
+        end
+    end
+
+    always @(posedge clk or negedge sm_rst_n) begin
+        if (!sm_rst_n) begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+        end else if (perf_clear) begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+        end else begin
+            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
         end
     end
 `endif
