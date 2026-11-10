@@ -1,8 +1,9 @@
 `timescale 1ns / 1ps
 // SIMT vector register file: two read ports and one masked write-back port.
-// Each lane has duplicated synchronous RAM banks for rs1 and rs2. R0 reads
-// as zero and ignores write-back. BRAM read and operand capture take two
-// cycles; only valid is reset, while RAM and payload registers retain data.
+// Each lane has odd/even banks, each holding half the register addresses.
+// R0 reads as zero and ignores write-back.
+// BRAM read and operand capture take two cycles; only valid is reset, 
+// while RAM and payload registers retain data.
 
 import gpu_pkg::*;
 
@@ -20,20 +21,33 @@ module vector_regfile (
 );
 
     // One register entry per warp/register pair.
-    localparam RAM_DEPTH = MAX_WARPS * NUM_REGS;
+    localparam BANK_DEPTH = MAX_WARPS * (NUM_REGS / 2);
 
-    // Duplicate each lane's single-read RAM to provide independent rs1/rs2.
-    // Use full 32-bit lane writes in separate RAM instances, rather than two
-    // sliced vector memories assigned in the same procedural write loop.
+    // Two distinct nonzero sources must have opposite parity. The compiler
+    // repairs conflicts; R0 is bypassed and identical sources are broadcast.
     // When executing BR (0xC0), route decode.rd to rs1 read port so op.rs1_data
     // contains the predicate register for direct register-based branching.
-    wire [4:0] eff_rs1 = (decode.opcode == 8'hC0) ? decode.rd : decode.rs1;
+    wire uses_two_sources = (decode.opcode >= 8'h01 && decode.opcode <= 8'h08) || decode.opcode == 8'hA1;
+    wire uses_rs1 = uses_two_sources || decode.opcode == 8'h81 || decode.opcode == 8'hA0 || decode.opcode == 8'hC0;
+    wire [4:0] eff_rs1 = !uses_rs1 ? 5'd0 : (decode.opcode == 8'hC0 ? decode.rd : decode.rs1);
+    wire [4:0] eff_rs2 = uses_two_sources ? decode.rs2 : 5'd0;
     wire [7:0] addr_rs1 = {decode.warp_id, eff_rs1};
-    wire [7:0] addr_rs2 = {decode.warp_id, decode.rs2};
-    wire [7:0] addr_wb = {wb.warp_id, wb.rd};
+    wire [7:0] addr_rs2 = {decode.warp_id, eff_rs2};
+    wire [6:0] addr_wb = {wb.warp_id, wb.rd[4:1]};
+    wire [6:0] even_address = {decode.warp_id, ((!eff_rs1[0] && eff_rs1 != 0) ? eff_rs1[4:1] : eff_rs2[4:1])};
+    wire [6:0] odd_address = {decode.warp_id, (eff_rs1[0] ? eff_rs1[4:1] : eff_rs2[4:1])};
 
-    wire [DATA_W-1:0] rs1_data_read;
-    wire [DATA_W-1:0] rs2_data_read;
+    wire [DATA_W-1:0] even_data_read;
+    wire [DATA_W-1:0] odd_data_read;
+
+`ifndef SYNTHESIS
+    always @(posedge clk) begin
+        if (rst_n && decode.valid && eff_rs1 != 0 && eff_rs2 != 0 &&
+            eff_rs1 != eff_rs2 && eff_rs1[0] == eff_rs2[0])
+            $fatal(1, "VRF bank conflict: warp=%0d opcode=%h rs1=R%0d rs2=R%0d",
+                   decode.warp_id, decode.opcode, eff_rs1, eff_rs2);
+    end
+`endif
 
     // Pipeline registers for control signals
     reg [7:0] addr_rs1_q, addr_rs2_q;
@@ -51,15 +65,15 @@ module vector_regfile (
 
     for (genvar lane = 0; lane < NUM_LANES; lane++) begin : gen_lane_ram
         wire lane_write_enable = wb.valid && (wb.rd != 5'd0) && wb.mask[lane];
-        vector_regfile_ram #(.DEPTH(RAM_DEPTH), .ADDR_W(8)) u_rs1 (
-            .clk(clk), .write_enable(lane_write_enable),
+        vector_regfile_ram #(.DEPTH(BANK_DEPTH), .ADDR_W(7)) u_even (
+            .clk(clk), .write_enable(lane_write_enable && !wb.rd[0]),
             .write_address(addr_wb), .write_data(wb.data[lane*32 +: 32]),
-            .read_address(addr_rs1), .read_data(rs1_data_read[lane*32 +: 32])
+            .read_address(even_address), .read_data(even_data_read[lane*32 +: 32])
         );
-        vector_regfile_ram #(.DEPTH(RAM_DEPTH), .ADDR_W(8)) u_rs2 (
-            .clk(clk), .write_enable(lane_write_enable),
+        vector_regfile_ram #(.DEPTH(BANK_DEPTH), .ADDR_W(7)) u_odd (
+            .clk(clk), .write_enable(lane_write_enable && wb.rd[0]),
             .write_address(addr_wb), .write_data(wb.data[lane*32 +: 32]),
-            .read_address(addr_rs2), .read_data(rs2_data_read[lane*32 +: 32])
+            .read_address(odd_address), .read_data(odd_data_read[lane*32 +: 32])
         );
     end
 
@@ -105,8 +119,8 @@ module vector_regfile (
         op.rd <= decode_rd_q;
         op.imm <= decode_imm_q;
         op.is_imm <= decode_is_imm_q;
-        op.rs1_data <= (addr_rs1_q[4:0] == 0) ? '0 : rs1_data_read;
-        op.rs2_data <= (addr_rs2_q[4:0] == 0) ? '0 : rs2_data_read;
+        op.rs1_data <= (addr_rs1_q[4:0] == 0) ? '0 : (addr_rs1_q[0] ? odd_data_read : even_data_read);
+        op.rs2_data <= (addr_rs2_q[4:0] == 0) ? '0 : (addr_rs2_q[0] ? odd_data_read : even_data_read);
     end
 
 endmodule
