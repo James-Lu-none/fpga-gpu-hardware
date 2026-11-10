@@ -14,10 +14,23 @@ reset_run synth_1
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} { error "Synthesis failed" }
+
+# Immediately export post-synthesis hierarchical utilization so that detailed
+# module-level resource breakdown is always available even if implementation fails.
+open_run synth_1
+report_utilization -hierarchical -file $output/synth_utilization_hierarchical.rpt
+close_design
+
 reset_run impl_1
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1
 if {![string match "*route_design Complete*" [get_property STATUS [get_runs impl_1]]]} {
+    # If implementation failed, try to capture implementation state if available
+    catch {
+        open_run impl_1
+        report_utilization -hierarchical -file $output/impl_failed_utilization.rpt
+        close_design
+    }
     error "Routing did not complete"
 }
 open_run impl_1
