@@ -26,7 +26,7 @@ module fetch_decode (
     instruction_ram #(.DEPTH(IRAM_DEPTH), .ADDR_W(12)) u_iram (
         .clk(clk), .write_enable(iram_we),
         .write_address(iram_waddr), .write_data(iram_wdata),
-        .read_address(issue.pc), .read_data(fetched_instr)
+        .read_address(fetch_address), .read_data(fetched_instr)
     );
 
     // 2. accept issue signals from warp context
@@ -38,10 +38,16 @@ module fetch_decode (
     reg [15:0] issue_block_idx_y_q;
     reg [15:0] issue_thread_id_start_q;
 
+    // Two elastic stages: fetched instruction/metadata, then decoded output.
+    // Hold the IRAM read address with its metadata under backpressure.
+    wire decode_advance = !decode.valid || decode.ready;
+    assign issue.ready = rst_n && (!issue_valid_q || decode_advance);
+    wire [11:0] fetch_address = issue.ready ? issue.pc : issue_pc_q;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             issue_valid_q <= 1'b0;
-        end else begin
+        end else if (issue.ready) begin
             issue_valid_q <= issue.valid;
             issue_warp_id_q <= issue.warp_id;
             issue_pc_q <= issue.pc;
@@ -71,7 +77,7 @@ module fetch_decode (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             decode.valid <= 1'b0;
-        end else begin
+        end else if (decode_advance) begin
             decode.valid <= issue_valid_q;
             
             decode.warp_id <= issue_warp_id_q;
