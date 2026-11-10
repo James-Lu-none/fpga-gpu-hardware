@@ -24,6 +24,7 @@ endinterface
 
 interface issue_if;
     logic valid;
+    logic ready;
     logic [$clog2(MAX_WARPS)-1:0] warp_id;
     logic [11:0] pc;
     logic [31:0] active_mask;
@@ -31,12 +32,13 @@ interface issue_if;
     logic [15:0] block_idx_y;
     logic [15:0] thread_id_start;
     
-    modport master (output valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start);
-    modport slave  (input  valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start);
+    modport master (output valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start, input ready);
+    modport slave  (input  valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start, output ready);
 endinterface
 
 interface decode_if;
     logic valid;
+    logic ready;
     logic [$clog2(MAX_WARPS)-1:0] warp_id;
     logic [11:0] pc;
     logic [31:0] active_mask;
@@ -53,11 +55,13 @@ interface decode_if;
     
     modport master (
         output valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start,
-        output opcode, rd, rs1, rs2, imm, is_imm
+        output opcode, rd, rs1, rs2, imm, is_imm,
+        input ready
     );
     modport slave (
         input  valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start,
-        input  opcode, rd, rs1, rs2, imm, is_imm
+        input  opcode, rd, rs1, rs2, imm, is_imm,
+        output ready
     );
 endinterface
 
