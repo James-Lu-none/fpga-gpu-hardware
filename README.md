@@ -254,12 +254,19 @@ The entire system uses XDMA's generated clock (axi_aclk: 125MHz) and asynchronou
 Cache tag statistics include reads and writes. A write with a matching tag
 is a hit but still writes through to memory, so AXI transaction totals are not
 identical to cache misses. After completion, `req_count = hit_count + miss_count`
-
 at each cache. Partial captures during execution can have requests awaiting
 lookup, so this equality need not hold mid-kernel.
-LSU FIFO counters count instructions, not lane memory beats; divergent addresses
-can generate multiple cache requests per instruction. Summed LSU wait/full
-cycles can exceed GPC `cycle_count` because several SPs wait simultaneously.
+Divergent addresses can generate multiple cache requests per instruction. Summed
+LSU wait/full cycles can exceed GPC `cycle_count` because several SPs wait simultaneously.
+
+Pipelined counter accumulation and timing closure:
+When scaling to multiple SMs and Sub-Partitions, gathering performance events combinationally from deep SP control logic across multi-level adder trees into central 32-bit accumulators created a cross-hierarchy critical path exceeding the 8ns (125MHz) clock budget.
+
+We pruned 5 white-box microarchitectural counters (`warp_swap`, `lsu_fifo_push/pop`, and `simt_stack_push/pop`) down to 14 standard metrics, and introduced a 2-stage pipelined datapath:
+- Stage 1: In `sm_top`, SP and L1 events are summed and registered into `perf_increments`.
+- Stage 2: In `gpc_top`, SM increments, L2 cache events, and AXI stalls are summed and registered into `perf_increments` entering `gpc_control_register`.
+
+To match the 2-cycle datapath latency without losing in-flight events, `gpc_control_register` delays the event accumulation enable window by 2 cycles (`perf_running_d2`). Active runtime cycles (`cycle_count`) remain tracked in real time via `perf_running`, while the remaining 13 event counters accumulate their pipelined increments in parallel and drain cleanly upon completion.
 
 ### Assertion failed: Kernel did not exercise AXI VRAM reads/writes when NUM_SUB_PARTITIONS >= 2 
 
