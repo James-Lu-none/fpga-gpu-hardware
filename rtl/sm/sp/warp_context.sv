@@ -148,7 +148,7 @@ module warp_context (
             // 3. Dynamic Scheduler (Round-Robin)
             // Look for a READY warp starting from rr_idx
             // Simplified combinational scan for 16 warps
-            begin : rr_scheduler
+            if (!issue.valid || issue.ready) begin : rr_scheduler
                 reg [$clog2(MAX_WARPS)-1:0] next_idx;
                 reg found;
                 found = 1'b0;
@@ -173,7 +173,8 @@ module warp_context (
                     issue.block_idx_y <= warp_block_idx_y[next_idx];
                     issue.thread_id_start <= warp_thread_id_start[next_idx];
                     
-                    // Set state to STALL so we don't issue it again until it writes back
+                    // Reserve the warp when filling the issue register. If
+                    // fetch blocks, hold valid/payload and do not select it twice.
                     warp_state[next_idx] <= STATE_STALL;
                     
                     // Move Round-Robin index to next warp
@@ -190,7 +191,7 @@ module warp_context (
     always_comb begin
         perf_events = '0;
         perf_events[PERF_INST_RETIRED] = ctx_wb.valid;
-        perf_events[PERF_WARP_ISSUE] = issue.valid;
+        perf_events[PERF_WARP_ISSUE] = issue.valid && issue.ready;
         perf_events[PERF_WARP_DONE] = ctx_wb.valid && ctx_wb.is_done;
     end
 `endif
