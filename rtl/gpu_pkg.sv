@@ -8,9 +8,9 @@ package gpu_pkg;
     localparam bit [7:0] HW_VERSION_MINOR = 8'd0;
 
     // Architecture Hierarchy Parameters (N, M, K)
-    parameter NUM_SMS = 4;
-    parameter NUM_SUB_PARTITIONS = 8;
-    parameter NUM_LANES = 16;
+    parameter NUM_SMS = 2;
+    parameter NUM_SUB_PARTITIONS = 2;
+    parameter NUM_LANES = 8;
 
     // Derived & Microarchitectural Parameters
     parameter DATA_W = 32 * NUM_LANES; // Vector datapath width (bits)
