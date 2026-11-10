@@ -37,8 +37,13 @@ module vector_regfile_tb;
                 checks++;
             end
             if (decode.valid) begin
-                e.rs1 = golden[decode.warp_id][decode.rs1];
-                e.rs2 = golden[decode.warp_id][decode.rs2];
+                bit two_sources, first_used;
+                logic [4:0] first_reg;
+                two_sources = (decode.opcode >= 8'h01 && decode.opcode <= 8'h08) || decode.opcode == 8'hA1;
+                first_used = two_sources || decode.opcode == 8'h81 || decode.opcode == 8'hA0 || decode.opcode == 8'hC0;
+                first_reg = !first_used ? 5'd0 : (decode.opcode == 8'hC0 ? decode.rd : decode.rs1);
+                e.rs1 = golden[decode.warp_id][first_reg];
+                e.rs2 = two_sources ? golden[decode.warp_id][decode.rs2] : 64'd0;
                 e.tag = decode.imm;
                 e.mask = decode.active_mask;
                 e.opcode = decode.opcode;
@@ -74,7 +79,7 @@ module vector_regfile_tb;
                 decode.pc = 12'(w*32+r);
                 decode.imm = 32'habcd0000 | 32'(w*32+r);
                 decode.active_mask = 32'(r%4);
-                decode.opcode = r[0] ? 8'ha1 : 8'ha0;
+                decode.opcode = r[0] ? 8'h02 : 8'h01;
             end
         @(negedge clk); decode.valid = 0;
         repeat (4) @(negedge clk);
@@ -90,6 +95,12 @@ module vector_regfile_tb;
             for (int r = 0; r < NUM_REGS; r++) golden[w][r] = 0;
         repeat (5) @(negedge clk);
         rst_n = 1;
+        if ($test$plusargs("expect_bank_conflict")) begin
+            @(negedge clk);
+            decode.valid = 1; decode.opcode = 8'h01; decode.rs1 = 2; decode.rs2 = 4;
+            repeat (3) @(negedge clk);
+            $fatal(1, "Bank conflict was not detected");
+        end
         for (int w = 0; w < MAX_WARPS; w++)
             for (int r = 1; r < NUM_REGS; r++)
                 write_reg(w, r, 3, {32'h89ab0000 | 32'(w*32+r), 32'h13570000 | 32'(w*32+r)});
@@ -104,6 +115,30 @@ module vector_regfile_tb;
         end
         read_stream(1);
         read_stream(0);
+        // Read/write overlap must retain old-data semantics on the written
+        // bank; no read bubbles are needed when the source pair is legal.
+        @(negedge clk);
+        decode.valid = 1; decode.warp_id = 0;
+        decode.rs1 = 7; decode.rs2 = 8; decode.pc = 12'h321;
+        decode.imm = 32'h01234567; decode.opcode = 8'h01;
+        decode.active_mask = 3;
+        for (int n = 0; n < 4; n++) begin
+            wb.valid = 1; wb.warp_id = 0; wb.rd = 7; wb.mask = 3;
+            wb.data = {32'hcafef000 | 32'(n), 32'h12345000 | 32'(n)};
+            @(negedge clk);
+        end
+        wb.valid = 0;
+        // R0 must not consume the bank needed by the other even source.
+        decode.rs1 = 0; decode.rs2 = 2;
+        @(negedge clk); decode.rs1 = 2; decode.rs2 = 0;
+        // An immediate's encoded rs2 bits are not a second operand.
+        @(negedge clk); decode.opcode = 8'h81; decode.rs1 = 2; decode.rs2 = 4;
+        // BR reads its predicate from rd, not from either encoded source field.
+        @(negedge clk); decode.opcode = 8'hC0; decode.rd = 9;
+        @(negedge clk); decode.opcode = 8'hB0;
+        @(negedge clk); decode.valid = 0;
+        repeat (4) @(negedge clk);
+        if (pending.size() != 0) $fatal(1, "Missing banked operands");
         // Assert reset between clock edges with a decode in flight. Payload
         // and RAM need no reset, but no pre-reset valid may escape afterward.
         @(negedge clk); decode.valid = 1; decode.rs1 = 1; decode.rs2 = 0;
@@ -121,7 +156,7 @@ module vector_regfile_tb;
         repeat (4) @(negedge clk);
         read_stream(0); // The masked register contents must survive reset.
         if (cancelled != 1) $fatal(1, "Unexpected number of flushed operands");
-        $display("PASS: VRF %0d back-to-back operands; ports, masks, R0, two-cycle alignment, asynchronous valid reset and RAM retention", checks);
+        $display("PASS: VRF %0d operands; odd/even banks, broadcast, R0, write overlap, immediate/branch sources, masks, reset and two-cycle alignment", checks);
         $finish;
     end
     initial begin
