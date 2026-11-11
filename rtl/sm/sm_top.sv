@@ -111,7 +111,21 @@ module streaming_multiprocessor #(
 
     // Pending block reception reserves this SM until its warps are allocated.
     // Reporting stale free slots can over-dispatch and declare completion early.
-    assign available_warp_slots = (rx_state == ST_IDLE) ? max_free_slots : 5'd0;
+    // Registering available_warp_slots breaks the 15-level combinational path between
+    // warp_context in sub-partitions and thread_block_scheduler in GPC.
+    reg [4:0] available_warp_slots_q;
+    always @(posedge clk or negedge sm_rst_n) begin
+        if (!sm_rst_n) begin
+            available_warp_slots_q <= 5'd0;
+        end else begin
+            if (rx_state != ST_IDLE || block_issue_valid) begin
+                available_warp_slots_q <= 5'd0;
+            end else begin
+                available_warp_slots_q <= max_free_slots;
+            end
+        end
+    end
+    assign available_warp_slots = available_warp_slots_q;
     wire alloc_ready = sp_alloc_ready[alloc_target_sp];
 
     // SM Idle Status: receiver is ST_IDLE and all sub-partitions have all warp slots free
