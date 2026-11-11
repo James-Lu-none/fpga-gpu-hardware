@@ -77,18 +77,11 @@ module sp_dpath (
     reg [2:0] ex1_fn;
     reg [31:0] ex1_mask;
     wire [31:0] lane_result [0:NUM_LANES-1];
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            ex1_fn <= 3'd3;
-            ex1_mask <= 32'd0;
-            ex2_fn <= 3'd3;
-            ex2_mask <= 0;
-        end else begin
-            ex1_fn <= alu_fn;
-            ex1_mask <= op.active_mask;
-            ex2_fn <= ex1_fn;
-            ex2_mask <= ex1_mask;
-        end
+    always @(posedge clk) begin
+        ex1_fn <= alu_fn;
+        ex1_mask <= op.active_mask;
+        ex2_fn <= ex1_fn;
+        ex2_mask <= ex1_mask;
     end
     for (genvar k = 0; k < NUM_LANES; k = k + 1) begin : gen_alu_lanes
         wire [31:0] a = op.rs1_data[k*32 +: 32];
@@ -149,23 +142,24 @@ module sp_dpath (
                                 ex2_fn == 3'd3 ? ex2_special[k] : ex2_logic[k];
     end
     // EX3 Stage: Vector Write-Back Assembly
+    // Only alu_wb.valid requires asynchronous reset. Keeping high-fanout payload
+    // registers (alu_wb.data, mask, rd, warp_id) off the async reset tree eliminates
+    // recovery timing violations.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            alu_wb.valid   <= 1'b0;
-            alu_wb.warp_id <= '0;
-            alu_wb.rd      <= 5'd0;
-            alu_wb.data    <= '0;
-            alu_wb.mask    <= 32'd0;
-        end else begin
             alu_wb.valid <= 1'b0;
-            if (ex1_valid && ex1_writes_reg && (ex1_rd != 5'd0)) begin
-                alu_wb.valid   <= 1'b1;
-                alu_wb.warp_id <= ex1_warp_id;
-                alu_wb.rd      <= ex1_rd;
-                alu_wb.mask    <= ex2_mask;
-                for (int k = 0; k < NUM_LANES; k = k + 1) begin
-                    alu_wb.data[k*32 +: 32] <= lane_result[k];
-                end
+        end else begin
+            alu_wb.valid <= ex1_valid && ex1_writes_reg && (ex1_rd != 5'd0);
+        end
+    end
+
+    always @(posedge clk) begin
+        if (ex1_valid && ex1_writes_reg && (ex1_rd != 5'd0)) begin
+            alu_wb.warp_id <= ex1_warp_id;
+            alu_wb.rd      <= ex1_rd;
+            alu_wb.mask    <= ex2_mask;
+            for (int k = 0; k < NUM_LANES; k = k + 1) begin
+                alu_wb.data[k*32 +: 32] <= lane_result[k];
             end
         end
     end

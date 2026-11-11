@@ -169,16 +169,15 @@ module sp_ctrl (
     end
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            ex1_valid   <= 1'b0;
-            ex1_opcode  <= 8'd0;
-            ex1_warp_id <= '0;
-            ex1_rd      <= 5'd0;
+            ex1_valid <= 1'b0;
         end else begin
-            ex1_valid   <= mul_align_valid;
-            ex1_opcode  <= mul_align_opcode;
-            ex1_warp_id <= mul_align_warp_id;
-            ex1_rd      <= mul_align_rd;
+            ex1_valid <= mul_align_valid;
         end
+    end
+    always @(posedge clk) begin
+        ex1_opcode  <= mul_align_opcode;
+        ex1_warp_id <= mul_align_warp_id;
+        ex1_rd      <= mul_align_rd;
     end
 
     wire is_exit   = ex1_valid && (ex1_opcode == OP_EXIT);
