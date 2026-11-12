@@ -81,31 +81,60 @@ module streaming_multiprocessor #(
         assign sp_alloc_ready[s] = alloc[s].ready;
     end
 
-    // Target Sub-Partition selection (select sp that has most free warp slots)
-    wire [$clog2(NUM_SPS)-1:0] alloc_target_sp;
+    // Target Sub-Partition selection
+    // Maintain a persistent round-robin pointer across all warps and blocks
+    // so work is evenly distributed among all sub-partitions.
+    localparam SP_PTR_W = (NUM_SPS > 1) ? $clog2(NUM_SPS) : 1;
+    reg [SP_PTR_W-1:0] sp_rr_ptr;
+    wire [SP_PTR_W-1:0] alloc_target_sp;
     wire [4:0] max_free_slots;
+    wire alloc_ready;
 
     generate
         if (NUM_SPS == 1) begin : gen_alloc_target_single
             assign alloc_target_sp = '0;
             assign max_free_slots  = sp_avail_slots[0];
+            assign alloc_ready     = sp_alloc_ready[0];
         end else begin : gen_alloc_target_multi
-            reg [$clog2(NUM_SPS)-1:0] target_sp_reg;
-            reg [4:0]                 max_slots_reg;
+            // 1-bit ready mask from each sub-partition
+            wire [NUM_SPS-1:0] sp_ready_vec;
+            for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_sp_ready_vec
+                assign sp_ready_vec[s] = sp_alloc_ready[s];
+            end
+
+            // 1-LUT Priority Rotator:
+            // Interleaves warps globally across sub-partitions starting from sp_rr_ptr.
+            // If the preferred SP is full (ready == 0), it dynamically skips to the next available SP!
+            reg [SP_PTR_W-1:0] target_sp_comb;
+            reg                target_ready_comb;
 
             always @(*) begin
-                target_sp_reg = '0;
-                max_slots_reg = 5'd0;
-                for (int s = 0; s < NUM_SPS; s = s + 1) begin
-                    if (sp_avail_slots[s] > max_slots_reg) begin
-                        max_slots_reg = sp_avail_slots[s];
-                        target_sp_reg = s[$clog2(NUM_SPS)-1:0];
+                target_sp_comb    = sp_rr_ptr;
+                target_ready_comb = 1'b0;
+                for (int i = 0; i < NUM_SPS; i = i + 1) begin
+                    int idx;
+                    idx = (32'(sp_rr_ptr) + i) % NUM_SPS;
+                    if (!target_ready_comb && sp_ready_vec[idx]) begin
+                        target_sp_comb    = SP_PTR_W'(idx);
+                        target_ready_comb = 1'b1;
                     end
                 end
             end
 
-            assign alloc_target_sp = target_sp_reg;
-            assign max_free_slots  = max_slots_reg;
+            assign alloc_target_sp = target_sp_comb;
+            assign alloc_ready     = target_ready_comb;
+
+            // Total free slots across all sub-partitions (sum of registers)
+            reg [5:0] total_free_slots_comb;
+            always @(*) begin
+                total_free_slots_comb = 6'd0;
+                for (int s = 0; s < NUM_SPS; s = s + 1) begin
+                    total_free_slots_comb = total_free_slots_comb + 6'(sp_avail_slots[s]);
+                end
+            end
+
+            // Saturate to 31 (5-bit interface limit)
+            assign max_free_slots = (total_free_slots_comb > 6'd31) ? 5'd31 : total_free_slots_comb[4:0];
         end
     endgenerate
 
@@ -126,7 +155,6 @@ module streaming_multiprocessor #(
         end
     end
     assign available_warp_slots = available_warp_slots_q;
-    wire alloc_ready = sp_alloc_ready[alloc_target_sp];
 
     // SM Idle Status: receiver is ST_IDLE and all sub-partitions have all warp slots free
     wire [NUM_SPS-1:0] sp_all_free;
@@ -145,6 +173,7 @@ module streaming_multiprocessor #(
             alloc_valid_reg    <= 1'b0;
             block_accepted_reg <= 1'b0;
             warp_cnt           <= 10'd0;
+            sp_rr_ptr          <= '0;
             accepted_block_x <= 0;
             accepted_block_y <= 0;
             accepted_warps_per_block <= 0;
@@ -169,7 +198,8 @@ module streaming_multiprocessor #(
                     block_accepted_reg <= 1'b0; // Deassert ack
                     alloc_valid_reg    <= 1'b1;
                     if (alloc_ready) begin
-                        rx_state <= ST_WAIT_WARP;
+                        rx_state  <= ST_WAIT_WARP;
+                        sp_rr_ptr <= SP_PTR_W'((32'(alloc_target_sp) + 1) % NUM_SPS);
                     end
                 end
 
