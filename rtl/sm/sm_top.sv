@@ -57,17 +57,22 @@ module streaming_multiprocessor #(
     // 1. sm level contoller
     // collect warp allocation status from SPs
     // report available_warp_slots
-    // accept block from TBS and report status
-    localparam ST_IDLE = 3'd0;
-    localparam ST_ISSUE_WARP = 3'd1;
-    localparam ST_WAIT_WARP = 3'd2;
-    localparam ST_NEXT_WARP = 3'd3;
+    // Parallel CTA Commit Architecture:
+    // Dispatches up to NUM_SPS warps in parallel across all sub-partitions simultaneously.
+    // Blocks with <= NUM_SPS warps commit in exactly 1 clock cycle!
+    localparam ST_IDLE      = 3'd0;
+    localparam ST_COMMIT    = 3'd1;
+    localparam ST_WAIT_DROP = 3'd2;
 
-    reg [2:0] rx_state;
-    reg [9:0] warp_cnt;
-    reg [15:0] accepted_block_x, accepted_block_y;
-    reg [9:0] accepted_warps_per_block;
-    wire [15:0] linear_block_id = accepted_block_x + (accepted_block_y * 16'd65535);
+    reg [2:0]  rx_state;
+    reg [15:0] accepted_block_x;
+    reg [15:0] accepted_block_y;
+    reg [9:0]  accepted_warps_per_block;
+    reg [9:0]  warp_base;
+    reg        block_accepted_reg;
+
+    localparam SP_PTR_W = (NUM_SPS > 1) ? $clog2(NUM_SPS) : 1;
+    reg [SP_PTR_W-1:0] sp_rr_ptr;
 
     warp_alloc_if alloc [0:NUM_SPS-1]();
 
@@ -81,50 +86,12 @@ module streaming_multiprocessor #(
         assign sp_alloc_ready[s] = alloc[s].ready;
     end
 
-    // Target Sub-Partition selection
-    // Maintain a persistent round-robin pointer across all warps and blocks
-    // so work is evenly distributed among all sub-partitions.
-    localparam SP_PTR_W = (NUM_SPS > 1) ? $clog2(NUM_SPS) : 1;
-    reg [SP_PTR_W-1:0] sp_rr_ptr;
-    wire [SP_PTR_W-1:0] alloc_target_sp;
+    // Compute total available warp slots across all sub-partitions
     wire [4:0] max_free_slots;
-    wire alloc_ready;
-
     generate
-        if (NUM_SPS == 1) begin : gen_alloc_target_single
-            assign alloc_target_sp = '0;
-            assign max_free_slots  = sp_avail_slots[0];
-            assign alloc_ready     = sp_alloc_ready[0];
-        end else begin : gen_alloc_target_multi
-            // 1-bit ready mask from each sub-partition
-            wire [NUM_SPS-1:0] sp_ready_vec;
-            for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_sp_ready_vec
-                assign sp_ready_vec[s] = sp_alloc_ready[s];
-            end
-
-            // 1-LUT Priority Rotator:
-            // Interleaves warps globally across sub-partitions starting from sp_rr_ptr.
-            // If the preferred SP is full (ready == 0), it dynamically skips to the next available SP!
-            reg [SP_PTR_W-1:0] target_sp_comb;
-            reg                target_ready_comb;
-
-            always @(*) begin
-                target_sp_comb    = sp_rr_ptr;
-                target_ready_comb = 1'b0;
-                for (int i = 0; i < NUM_SPS; i = i + 1) begin
-                    int idx;
-                    idx = (32'(sp_rr_ptr) + i) % NUM_SPS;
-                    if (!target_ready_comb && sp_ready_vec[idx]) begin
-                        target_sp_comb    = SP_PTR_W'(idx);
-                        target_ready_comb = 1'b1;
-                    end
-                end
-            end
-
-            assign alloc_target_sp = target_sp_comb;
-            assign alloc_ready     = target_ready_comb;
-
-            // Total free slots across all sub-partitions (sum of registers)
+        if (NUM_SPS == 1) begin : gen_alloc_cap_single
+            assign max_free_slots = sp_avail_slots[0];
+        end else begin : gen_alloc_cap_multi
             reg [5:0] total_free_slots_comb;
             always @(*) begin
                 total_free_slots_comb = 6'd0;
@@ -132,22 +99,116 @@ module streaming_multiprocessor #(
                     total_free_slots_comb = total_free_slots_comb + 6'(sp_avail_slots[s]);
                 end
             end
-
-            // Saturate to 31 (5-bit interface limit)
             assign max_free_slots = (total_free_slots_comb > 6'd31) ? 5'd31 : total_free_slots_comb[4:0];
         end
     endgenerate
 
-    // Pending block reception reserves this SM until its warps are allocated.
-    // Reporting stale free slots can over-dispatch and declare completion early.
-    // Registering available_warp_slots breaks the 15-level combinational path between
-    // warp_context in sub-partitions and thread_block_scheduler in GPC.
+    // Current block coordinates and dimensions (pass-through in IDLE for 1-cycle commit)
+    wire [15:0] cur_block_x = (rx_state == ST_IDLE) ? block_idx_x : accepted_block_x;
+    wire [15:0] cur_block_y = (rx_state == ST_IDLE) ? block_idx_y : accepted_block_y;
+    wire [9:0]  cur_warps_per_block = (rx_state == ST_IDLE) ? warps_per_block : accepted_warps_per_block;
+    wire [9:0]  cur_warp_base = (rx_state == ST_IDLE) ? 10'd0 : warp_base;
+    wire [15:0] linear_block_id = cur_block_x + (cur_block_y * 16'd65535);
+
+    // Parallel Routing: Map up to NUM_SPS warps to sub-partitions starting at sp_rr_ptr
+    wire [9:0]         sp_warp_idx   [0:NUM_SPS-1];
+    wire [NUM_SPS-1:0] sp_warp_needed;
+
+    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_parallel_alloc_calc
+        wire [31:0] k_val = (32'(s) >= 32'(sp_rr_ptr)) ?
+                            (32'(s) - 32'(sp_rr_ptr)) :
+                            (32'(s) + 32'(NUM_SPS) - 32'(sp_rr_ptr));
+        assign sp_warp_idx[s]    = cur_warp_base + k_val[9:0];
+        assign sp_warp_needed[s] = (sp_warp_idx[s] < cur_warps_per_block);
+    end
+
+    // Ready condition: All SPs that need to accept a warp in this slice must be ready
+    wire slice_ready   = &(~sp_warp_needed | sp_alloc_ready);
+    wire active_commit = (rx_state == ST_IDLE)   ? (block_issue_valid && !block_accepted_reg && slice_ready) :
+                         (rx_state == ST_COMMIT) ? slice_ready : 1'b0;
+
+    // Parallel Allocation Ports to all Sub-Partitions
+    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_ports
+        assign alloc[s].valid           = active_commit && sp_warp_needed[s];
+        assign alloc[s].block_id        = linear_block_id;
+        assign alloc[s].block_idx_x     = cur_block_x;
+        assign alloc[s].block_idx_y     = cur_block_y;
+        assign alloc[s].thread_id_start = sp_warp_idx[s] * WARP_SIZE;
+        assign alloc[s].active_mask     = {{(32-NUM_LANES){1'b0}}, {NUM_LANES{1'b1}}};
+    end
+
+    // State machine for CTA Parallel Commit
+    always @(posedge clk or negedge sm_rst_n) begin
+        if (!sm_rst_n) begin
+            rx_state                 <= ST_IDLE;
+            block_accepted_reg       <= 1'b0;
+            sp_rr_ptr                <= '0;
+            warp_base                <= 10'd0;
+            accepted_block_x         <= 16'd0;
+            accepted_block_y         <= 16'd0;
+            accepted_warps_per_block <= 10'd0;
+        end else begin
+            case (rx_state)
+                ST_IDLE: begin
+                    block_accepted_reg <= 1'b0;
+                    if (block_issue_valid && !block_accepted_reg && slice_ready) begin
+                        if (warps_per_block <= 10'(NUM_SPS)) begin
+                            // 1-CYCLE PARALLEL COMMIT! All warps absorbed this cycle.
+                            block_accepted_reg <= 1'b1;
+                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(warps_per_block)) % NUM_SPS);
+                            rx_state  <= ST_WAIT_DROP;
+                        end else begin
+                            // Multi-cycle parallel commit (absorbs NUM_SPS warps per cycle)
+                            accepted_block_x         <= block_idx_x;
+                            accepted_block_y         <= block_idx_y;
+                            accepted_warps_per_block <= warps_per_block;
+                            warp_base                <= 10'(NUM_SPS);
+                            sp_rr_ptr                <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(NUM_SPS)) % NUM_SPS);
+                            rx_state                 <= ST_COMMIT;
+                        end
+                    end
+                end
+
+                ST_COMMIT: begin
+                    if (slice_ready) begin
+                        if (warp_base + 10'(NUM_SPS) >= accepted_warps_per_block) begin
+                            // Final slice committed!
+                            block_accepted_reg <= 1'b1;
+                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + (32'(accepted_warps_per_block) - 32'(warp_base))) % NUM_SPS);
+                            rx_state  <= ST_WAIT_DROP;
+                        end else begin
+                            warp_base <= warp_base + 10'(NUM_SPS);
+                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(NUM_SPS)) % NUM_SPS);
+                            rx_state  <= ST_COMMIT;
+                        end
+                    end
+                end
+
+                ST_WAIT_DROP: begin
+                    block_accepted_reg <= 1'b0;
+                    rx_state           <= ST_IDLE;
+                end
+
+                default: rx_state <= ST_IDLE;
+            endcase
+        end
+    end
+
+    // Interface signals & debug tracing aliases
+    assign block_accepted = block_accepted_reg;
+
+    wire alloc_valid_reg = active_commit;
+    wire alloc_ready     = slice_ready;
+    wire [SP_PTR_W-1:0] alloc_target_sp = sp_rr_ptr;
+    wire [9:0] warp_cnt  = cur_warp_base;
+
+    // Available warp slots reporting to GPC scheduler
     reg [4:0] available_warp_slots_q;
     always @(posedge clk or negedge sm_rst_n) begin
         if (!sm_rst_n) begin
             available_warp_slots_q <= 5'd0;
         end else begin
-            if (rx_state != ST_IDLE || block_issue_valid) begin
+            if (rx_state == ST_COMMIT || (rx_state == ST_IDLE && block_issue_valid && !block_accepted_reg)) begin
                 available_warp_slots_q <= 5'd0;
             end else begin
                 available_warp_slots_q <= max_free_slots;
@@ -161,77 +222,7 @@ module streaming_multiprocessor #(
     for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_sp_idle_check
         assign sp_all_free[s] = (sp_avail_slots[s] == MAX_WARPS[4:0]);
     end
-    assign sm_idle = (rx_state == ST_IDLE) && (&sp_all_free);
-
-    reg alloc_valid_reg;
-    reg block_accepted_reg;
-    assign block_accepted = block_accepted_reg;
-
-    always @(posedge clk or negedge sm_rst_n) begin
-        if (!sm_rst_n) begin
-            rx_state           <= ST_IDLE;
-            alloc_valid_reg    <= 1'b0;
-            block_accepted_reg <= 1'b0;
-            warp_cnt           <= 10'd0;
-            sp_rr_ptr          <= '0;
-            accepted_block_x <= 0;
-            accepted_block_y <= 0;
-            accepted_warps_per_block <= 0;
-        end else begin
-            case (rx_state)
-                ST_IDLE: begin
-                    alloc_valid_reg    <= 1'b0;
-                    block_accepted_reg <= 1'b0;
-                    if (block_issue_valid) begin
-                        // TBS may move the shared dispatch bus to another SM
-                        // before this SM has a free warp slot. Keep our context.
-                        accepted_block_x <= block_idx_x;
-                        accepted_block_y <= block_idx_y;
-                        accepted_warps_per_block <= warps_per_block;
-                        warp_cnt           <= 10'd0;
-                        block_accepted_reg <= 1'b1;
-                        rx_state           <= ST_ISSUE_WARP;
-                    end
-                end
-
-                ST_ISSUE_WARP: begin
-                    block_accepted_reg <= 1'b0; // Deassert ack
-                    alloc_valid_reg    <= 1'b1;
-                    if (alloc_ready) begin
-                        rx_state  <= ST_WAIT_WARP;
-                        sp_rr_ptr <= SP_PTR_W'((32'(alloc_target_sp) + 1) % NUM_SPS);
-                    end
-                end
-
-                ST_WAIT_WARP: begin
-                    alloc_valid_reg <= 1'b0;
-                    if (alloc_ready) begin
-                        rx_state <= ST_NEXT_WARP;
-                    end
-                end
-
-                ST_NEXT_WARP: begin
-                    if (warp_cnt + 1 < accepted_warps_per_block) begin
-                        warp_cnt <= warp_cnt + 1'b1;
-                        rx_state <= ST_ISSUE_WARP;
-                    end else begin
-                        rx_state <= ST_IDLE;
-                    end
-                end
-
-                default: rx_state <= ST_IDLE;
-            endcase
-        end
-    end
-
-    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_ports
-        assign alloc[s].valid            = alloc_valid_reg && (alloc_target_sp == s);
-        assign alloc[s].block_id         = linear_block_id;
-        assign alloc[s].block_idx_x      = accepted_block_x;
-        assign alloc[s].block_idx_y      = accepted_block_y;
-        assign alloc[s].thread_id_start  = warp_cnt * WARP_SIZE;
-        assign alloc[s].active_mask      = {{(32-NUM_LANES){1'b0}}, {NUM_LANES{1'b1}}};
-    end
+    assign sm_idle = (rx_state == ST_IDLE) && (&sp_all_free) && !block_issue_valid;
 
 `ifdef ENABLE_GPU_DEBUG
     wire [PERF_COUNT-1:0] sp_perf_events [0:NUM_SPS-1];
