@@ -115,11 +115,14 @@ module streaming_multiprocessor #(
     wire [NUM_SPS-1:0] sp_warp_needed;
 
     for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_parallel_alloc_calc
-        wire [31:0] k_val = (32'(s) >= 32'(sp_rr_ptr)) ?
-                            (32'(s) - 32'(sp_rr_ptr)) :
-                            (32'(s) + 32'(NUM_SPS) - 32'(sp_rr_ptr));
-        assign sp_warp_idx[s]    = cur_warp_base + k_val[9:0];
-        assign sp_warp_needed[s] = (sp_warp_idx[s] < cur_warps_per_block);
+        if (NUM_SPS == 1) begin : gen_single_sp
+            assign sp_warp_idx[s]    = cur_warp_base;
+            assign sp_warp_needed[s] = (cur_warp_base < cur_warps_per_block);
+        end else begin : gen_multi_sp
+            wire [SP_PTR_W-1:0] k_val = SP_PTR_W'(s) - sp_rr_ptr;
+            assign sp_warp_idx[s]    = {cur_warp_base[9:SP_PTR_W], k_val};
+            assign sp_warp_needed[s] = (sp_warp_idx[s] < cur_warps_per_block);
+        end
     end
 
     // Ready condition: All SPs that need to accept a warp in this slice must be ready
@@ -155,7 +158,7 @@ module streaming_multiprocessor #(
                         if (warps_per_block <= 10'(NUM_SPS)) begin
                             // 1-CYCLE PARALLEL COMMIT! All warps absorbed this cycle.
                             block_accepted_reg <= 1'b1;
-                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(warps_per_block)) % NUM_SPS);
+                            sp_rr_ptr <= sp_rr_ptr + warps_per_block[SP_PTR_W-1:0];
                             rx_state  <= ST_WAIT_DROP;
                         end else begin
                             // Multi-cycle parallel commit (absorbs NUM_SPS warps per cycle)
@@ -163,7 +166,6 @@ module streaming_multiprocessor #(
                             accepted_block_y         <= block_idx_y;
                             accepted_warps_per_block <= warps_per_block;
                             warp_base                <= 10'(NUM_SPS);
-                            sp_rr_ptr                <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(NUM_SPS)) % NUM_SPS);
                             rx_state                 <= ST_COMMIT;
                         end
                     end
@@ -174,11 +176,10 @@ module streaming_multiprocessor #(
                         if (warp_base + 10'(NUM_SPS) >= accepted_warps_per_block) begin
                             // Final slice committed!
                             block_accepted_reg <= 1'b1;
-                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + (32'(accepted_warps_per_block) - 32'(warp_base))) % NUM_SPS);
+                            sp_rr_ptr <= sp_rr_ptr + accepted_warps_per_block[SP_PTR_W-1:0];
                             rx_state  <= ST_WAIT_DROP;
                         end else begin
                             warp_base <= warp_base + 10'(NUM_SPS);
-                            sp_rr_ptr <= SP_PTR_W'((32'(sp_rr_ptr) + 32'(NUM_SPS)) % NUM_SPS);
                             rx_state  <= ST_COMMIT;
                         end
                     end
