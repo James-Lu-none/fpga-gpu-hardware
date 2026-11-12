@@ -33,7 +33,7 @@ FLAGS := --binary --timing --trace --assert -j $(JOBS) -Wno-fatal -I$(RTL)/commo
 
 export CC CFLAGS VERILATOR JOBS OPENCL_MAX_CYCLES GPC_CLOCK_HZ TRACE BUILD FPGAGPU_CLANG
 
-check: mul32-check vrf-check cache-store-check lsu-reset-check gpc-sim
+check: mul32-check vrf-check cache-store-check lsu-reset-check sm-commit-check gpc-sim
 	./run_sim.sh $(TESTS)
 
 gpc-sim: $(BUILD)/gpc/Vgpc_top_tb
@@ -56,6 +56,14 @@ lsu-reset-check: $(BUILD)/lsu-reset/Vlsu_reset_tb
 $(BUILD)/lsu-reset/Vlsu_reset_tb: unit/lsu_reset/lsu_reset_tb.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)/lsu-reset
 	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv unit/lsu_reset/lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
+
+.PHONY: sm-commit-check
+sm-commit-check: $(BUILD)/sm-commit/Vsm_commit_tb
+	./$(BUILD)/sm-commit/Vsm_commit_tb
+
+$(BUILD)/sm-commit/Vsm_commit_tb: unit/sm_commit/sm_commit_tb.sv $(GPC_SOURCES)
+	mkdir -p $(BUILD)/sm-commit
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module sm_commit_tb --Mdir $(BUILD)/sm-commit $(GPC_SOURCES) unit/sm_commit/sm_commit_tb.sv > $(BUILD)/sm-commit/compile.log 2>&1 || { cat $(BUILD)/sm-commit/compile.log; exit 1; }
 
 .PHONY: cache-store-check
 cache-store-check: $(BUILD)/cache-store/Vcache_store_tb
