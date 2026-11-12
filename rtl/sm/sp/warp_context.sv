@@ -48,25 +48,39 @@ module warp_context (
     reg [43:0] simt_stack [0:MAX_WARPS-1][0:3];
     reg [2:0] simt_sp [0:MAX_WARPS-1];
 
-    // Find the first FREE warp slot
-    reg [$clog2(MAX_WARPS)-1:0] free_warp_idx;
-    reg has_free_warp;
-    integer i;
+    // Track free slots via an counter instead of scanning all warp states every cycle.
+    // alloc_fire consumes a slot; done_fire (warp retirement) releases a slot.
+    reg [4:0] free_warps_cnt;
+    wire has_free_warp = (free_warps_cnt != 5'd0);
+    wire alloc_fire = alloc.valid && has_free_warp;
+    wire done_fire  = ctx_wb.valid && ctx_wb.is_done;
 
-    always @(*) begin
-        has_free_warp = 1'b0;
-        free_warp_idx = '0;
-        alloc.available_slots = 5'd0;
-        for (i = MAX_WARPS-1; i >= 0; i = i - 1) begin
-            if (warp_state[i] == STATE_FREE || warp_state[i] == STATE_DONE) begin
-                has_free_warp = 1'b1;
-                free_warp_idx = $clog2(MAX_WARPS)'(i); // Will find the lowest index because loop counts down
-                alloc.available_slots = alloc.available_slots + 1;
-            end
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            free_warps_cnt <= MAX_WARPS[4:0];
+        end else begin
+            case ({alloc_fire, done_fire})
+                2'b10: free_warps_cnt <= free_warps_cnt - 1'b1;
+                2'b01: free_warps_cnt <= free_warps_cnt + 1'b1;
+                default: ; // unchanged
+            endcase
         end
     end
 
+    assign alloc.available_slots = free_warps_cnt;
     assign alloc.ready = has_free_warp;
+
+    // Find the lowest index free warp slot for allocation
+    reg [$clog2(MAX_WARPS)-1:0] free_warp_idx;
+    integer i;
+    always @(*) begin
+        free_warp_idx = '0;
+        for (i = MAX_WARPS-1; i >= 0; i = i - 1) begin
+            if (warp_state[i] == STATE_FREE || warp_state[i] == STATE_DONE) begin
+                free_warp_idx = $clog2(MAX_WARPS)'(i);
+            end
+        end
+    end
 
     // Round-Robin Scheduler State
     reg [$clog2(MAX_WARPS)-1:0] rr_idx;
