@@ -2,7 +2,7 @@
 set cpu_count [string trim [exec nproc]]
 set_param general.maxThreads [expr {min(8, $cpu_count)}]
 # Shared project recipe: source in the GUI Tcl console or use -source in batch.
-set hardware_root [file dirname [file normalize [info script]]]
+set hardware_root [file dirname [file dirname [file normalize [info script]]]]
 set project_dir [file join $hardware_root build vivado]
 if {[info exists ::env(FPGAGPU_PROJECT_DIR)]} {
     set project_dir [file normalize $::env(FPGAGPU_PROJECT_DIR)]
@@ -25,7 +25,7 @@ namespace eval fpgagpu_sources {
         return $result
     }
 }
-set hardware_root [file dirname [file normalize [info script]]]
+set hardware_root [file dirname [file dirname [file normalize [info script]]]]
 set rtl_files [fpgagpu_sources::collect [file join $hardware_root rtl] {.sv .v .vh .svh .vhd .vhdl .mem .hex}]
 if {![llength $rtl_files]} { error "No RTL sources found" }
 add_files -norecurse -fileset sources_1 $rtl_files

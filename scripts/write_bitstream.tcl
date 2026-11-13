@@ -1,7 +1,7 @@
 # Vivado 2026.1 supports at most eight threads per process.
 set cpu_count [string trim [exec nproc]]
 set_param general.maxThreads [expr {min(8, $cpu_count)}]
-set hardware_root [file dirname [file normalize [info script]]]
+set hardware_root [file dirname [file dirname [file normalize [info script]]]]
 set output [file join $hardware_root build output]
 if {[info exists ::env(CI_OUTPUT_DIR)]} { set output [file normalize $::env(CI_OUTPUT_DIR)] }
 file mkdir $output

@@ -10,6 +10,14 @@ report_timing -delay_type max -max_paths 50 -sort_by group -nworst 2 -file ./tim
 
 ```
 
+載入已佈線檢查點（routed.dcp），輸出全晶片邏輯級數分佈與前 50 條最長組合路徑:
+
+```bash
+vivado -mode batch -notrace \
+  -source scripts/report_logic_levels.tcl \
+  -tclargs /home/github-runner/ci-artifacts/James-Lu-none/fpga-gpu/43292158232/1/vivado/routed.dcp 50
+```
+
 if using block design:
 
 ```bash
@@ -23,10 +31,10 @@ Reproducible Vivado project
 
 ```bash
 # From this directory; creates build/vivado/fpga-gpu.xpr (does not run synthesis).
-vivado -mode gui -source create_project.tcl
+vivado -mode gui -source scripts/create_project.tcl
 # Batch implementation, then optional bitstream:
-vivado -mode batch -source implement.tcl
-vivado -mode batch -source write_bitstream.tcl
+vivado -mode batch -source scripts/implement.tcl
+vivado -mode batch -source scripts/write_bitstream.tcl
 ```
 
 ## verilog attributes

@@ -1,15 +1,15 @@
 # CI implementation entry point; source paths are relative to this script.
-set hardware_root [file dirname [file normalize [info script]]]
+set hardware_root [file dirname [file dirname [file normalize [info script]]]]
 set output [file join $hardware_root build output]
 if {[info exists ::env(CI_OUTPUT_DIR)]} { set output [file normalize $::env(CI_OUTPUT_DIR)] }
 file mkdir $output
 set jobs [string trim [exec nproc]]
 if {[info exists ::env(VIVADO_JOBS)]} { set jobs $::env(VIVADO_JOBS) }
 if {![string is integer -strict $jobs] || $jobs < 1} { error "Invalid VIVADO_JOBS" }
-set hardware_root [file dirname [file normalize [info script]]]
+set hardware_root [file dirname [file dirname [file normalize [info script]]]]
 # Each CI invocation gets a clean generated project under the artifact workspace.
 set ::env(FPGAGPU_PROJECT_DIR) [file join $output project]
-source [file join $hardware_root create_project.tcl]
+source [file join $hardware_root scripts create_project.tcl]
 reset_run synth_1
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
