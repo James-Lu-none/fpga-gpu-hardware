@@ -13,7 +13,11 @@ package gpu_pkg;
     parameter NUM_LANES = 16;
 
     // Derived & Microarchitectural Parameters
-    parameter DATA_W = 32 * NUM_LANES; // Vector datapath width (bits)
+    parameter LANE_DATA_W = 32; // Single SIMT lane data width
+    parameter WARP_DATA_W = LANE_DATA_W * NUM_LANES;// Full warp vector width (e.g. 512 bits)
+    parameter DATA_W_L1 = 256; // L1 cache interface width (bits)
+    parameter STRB_W_L1 = DATA_W_L1 / 8; // L1 write strobe width (bytes)
+    parameter DATA_W = WARP_DATA_W; // Backwards compatibility alias
     parameter MAX_WARPS = 8;
     parameter NUM_REGS = 32;
     parameter IRAM_DEPTH = 1024;
