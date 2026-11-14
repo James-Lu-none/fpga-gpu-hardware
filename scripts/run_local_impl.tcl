@@ -35,9 +35,19 @@ if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {
 }
 puts "=== Synthesis completed successfully ==="
 
+puts "=== Post-Synthesis Logic Level & Timing Inspection ==="
+open_run synth_1
+set synth_dcp [file join $output synth.dcp]
+write_checkpoint -force $synth_dcp
+set argv [list "" 30]
+source [file join $hardware_root scripts report_logic_levels.tcl]
+close_design
+
 puts "=== Resetting and Launching impl_1 (route_design, jobs=$jobs) ==="
 reset_run impl_1
-set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE RuntimeOptimized [get_runs impl_1]
+set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
+set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1
 if {![string match "*route_design Complete*" [get_property STATUS [get_runs impl_1]]]} {
@@ -53,6 +63,10 @@ set timing_rpt [file join $output timing.rpt]
 report_timing_summary -delay_type min_max -report_unconstrained -max_paths 50 -file $timing_rpt
 set util_rpt [file join $output utilization.rpt]
 report_utilization -hierarchical -file $util_rpt
+
+puts "=== Post-Routing Logic Level & Timing Inspection ==="
+set argv [list "" 30]
+source [file join $hardware_root scripts report_logic_levels.tcl]
 
 puts "=== Saved routed.dcp to: $routed_dcp ==="
 puts "=== Saved timing report to: $timing_rpt ==="

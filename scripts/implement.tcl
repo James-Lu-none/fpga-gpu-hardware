@@ -22,7 +22,9 @@ report_utilization -hierarchical -file $output/synth_utilization_hierarchical.rp
 close_design
 
 reset_run impl_1
-set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE RuntimeOptimized [get_runs impl_1]
+set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
+set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Explore [get_runs impl_1]
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1
 if {![string match "*route_design Complete*" [get_property STATUS [get_runs impl_1]]]} {
@@ -101,7 +103,9 @@ if {$index == 0} {
 foreach delay_type {max min} {
     set paths [get_timing_paths -delay_type $delay_type -max_paths 1]
     if {[llength $paths] == 0} { error "No $delay_type timing paths found" }
-    if {[get_property SLACK [lindex $paths 0]] < 0} { error "$delay_type timing failed" }
+    set worst_slack [get_property SLACK [lindex $paths 0]]
+    puts "=== Timing Gate $delay_type: Worst Slack = $worst_slack ns ==="
+    if {$worst_slack < 0} { error "$delay_type timing failed (Worst Slack = $worst_slack ns)" }
 }
 if {[llength [get_drc_violations -filter {SEVERITY == Error}]] > 0} { error "DRC errors found" }
 close_project
