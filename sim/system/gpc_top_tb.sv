@@ -151,6 +151,15 @@ module gpc_top_tb;
     reg [`NUM_SMS-1:0] prev_sm_issue_valid;
     reg [`NUM_SMS-1:0] prev_sm_accepted;
 
+    wire [4:0] sm1_slots;
+    generate
+        if (`NUM_SMS > 1) begin : gen_sm1_slots
+            assign sm1_slots = dut.gen_sm_array[1].u_sm.available_warp_slots;
+        end else begin : gen_sm1_slots
+            assign sm1_slots = 5'd0;
+        end
+    endgenerate
+
     always @(posedge clk) begin
         if (!rst_n) begin
             prev_tbs_state       <= 2'd0;
@@ -169,7 +178,7 @@ module gpc_top_tb;
                 $display("[Cycle %0d] [ASSERT] TBS: all_idle ASSERTED! (state=%s, sm0_slots=%0d, sm1_slots=%0d, MAX_WARPS=%0d)",
                          cycles, tbs_state_name(dut.u_scheduler.state),
                          dut.gen_sm_array[0].u_sm.available_warp_slots,
-                         (`NUM_SMS > 1 ? dut.gen_sm_array[1].u_sm.available_warp_slots : 5'd0),
+                         sm1_slots,
                          `MAX_WARPS);
             end
             prev_all_idle <= dut.u_scheduler.all_idle;

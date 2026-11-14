@@ -12,7 +12,7 @@
 `define HW_VERSION_MINOR            8'd0
 
 // Architecture Hierarchy Parameters (N, M, K)
-`define NUM_SMS                     2
+`define NUM_SMS                     1
 `define NUM_SUB_PARTITIONS          4
 `define NUM_SPS                     4
 `define NUM_LANES                   16
