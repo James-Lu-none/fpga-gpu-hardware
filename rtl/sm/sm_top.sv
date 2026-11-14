@@ -4,11 +4,9 @@
 // Receives dynamic Thread Block assignments from the GigaThread Engine (TBS).
 // Encapsulates M Sub-Partitions, local Thread Block Receiver, and Shared L1 Cache.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
-module streaming_multiprocessor #(
-    parameter NUM_SPS = gpu_pkg::NUM_SUB_PARTITIONS
-)(
+module streaming_multiprocessor (
     input wire clk,
     input wire rst_n,
     input wire flush,
@@ -18,6 +16,8 @@ module streaming_multiprocessor #(
     input wire [15:0] block_idx_x,
     input wire [15:0] block_idx_y,
     input wire [9:0] warps_per_block,
+    input wire [15:0] threads_per_block,
+    input wire [15:0] block_dim_x,
     
     output wire block_accepted,
     output wire [4:0] available_warp_slots,
@@ -41,7 +41,7 @@ module streaming_multiprocessor #(
     input wire [255:0]l1_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
     , input wire perf_clear,
-    output reg [31:0] perf_increments [0:PERF_COUNT-1]
+    output reg [31:0] perf_increments [0:`PERF_COUNT-1]
 `endif
 );
 
@@ -71,17 +71,17 @@ module streaming_multiprocessor #(
     reg [9:0]  warp_base;
     reg        block_accepted_reg;
 
-    localparam SP_PTR_W = (NUM_SPS > 1) ? $clog2(NUM_SPS) : 1;
+    localparam SP_PTR_W = (`NUM_SPS > 1) ? $clog2(`NUM_SPS) : 1;
     reg [SP_PTR_W-1:0] sp_rr_ptr;
 
-    warp_alloc_if alloc [0:NUM_SPS-1]();
+    warp_alloc_if alloc [0:`NUM_SPS-1]();
 
     // Unpack interface signals to regular logic arrays
     // since interface array is not allow to use runtime value as index
-    wire [4:0]         sp_avail_slots [0:NUM_SPS-1];
-    wire [NUM_SPS-1:0] sp_alloc_ready;
+    wire [4:0]           sp_avail_slots [0:`NUM_SPS-1];
+    wire [`NUM_SPS-1:0]  sp_alloc_ready;
 
-    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_unpack
+    for (genvar s = 0; s < `NUM_SPS; s = s + 1) begin : gen_alloc_unpack
         assign sp_avail_slots[s] = alloc[s].available_slots;
         assign sp_alloc_ready[s] = alloc[s].ready;
     end
@@ -89,13 +89,13 @@ module streaming_multiprocessor #(
     // Compute total available warp slots across all sub-partitions
     wire [4:0] max_free_slots;
     generate
-        if (NUM_SPS == 1) begin : gen_alloc_cap_single
+        if (`NUM_SPS == 1) begin : gen_alloc_cap_single
             assign max_free_slots = sp_avail_slots[0];
         end else begin : gen_alloc_cap_multi
             reg [5:0] total_free_slots_comb;
             always @(*) begin
                 total_free_slots_comb = 6'd0;
-                for (int s = 0; s < NUM_SPS; s = s + 1) begin
+                for (int s = 0; s < `NUM_SPS; s = s + 1) begin
                     total_free_slots_comb = total_free_slots_comb + 6'(sp_avail_slots[s]);
                 end
             end
@@ -104,18 +104,22 @@ module streaming_multiprocessor #(
     endgenerate
 
     // Current block coordinates and dimensions (pass-through in IDLE for 1-cycle commit)
+    reg [15:0] accepted_threads_per_block;
     wire [15:0] cur_block_x = (rx_state == ST_IDLE) ? block_idx_x : accepted_block_x;
     wire [15:0] cur_block_y = (rx_state == ST_IDLE) ? block_idx_y : accepted_block_y;
     wire [9:0]  cur_warps_per_block = (rx_state == ST_IDLE) ? warps_per_block : accepted_warps_per_block;
+    wire [15:0] cur_threads_per_block = (rx_state == ST_IDLE) ? threads_per_block : accepted_threads_per_block;
+    wire [15:0] eff_threads_per_block = (cur_threads_per_block != 16'd0) ? cur_threads_per_block :
+                                        (16'(cur_warps_per_block) * 16'(`WARP_SIZE));
     wire [9:0]  cur_warp_base = (rx_state == ST_IDLE) ? 10'd0 : warp_base;
     wire [15:0] linear_block_id = cur_block_x + (cur_block_y * 16'd65535);
 
     // Parallel Routing: Map up to NUM_SPS warps to sub-partitions starting at sp_rr_ptr
-    wire [9:0]         sp_warp_idx   [0:NUM_SPS-1];
-    wire [NUM_SPS-1:0] sp_warp_needed;
+    wire [9:0]           sp_warp_idx   [0:`NUM_SPS-1];
+    wire [`NUM_SPS-1:0]  sp_warp_needed;
 
-    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_parallel_alloc_calc
-        if (NUM_SPS == 1) begin : gen_single_sp
+    for (genvar s = 0; s < `NUM_SPS; s = s + 1) begin : gen_parallel_alloc_calc
+        if (`NUM_SPS == 1) begin : gen_single_sp
             assign sp_warp_idx[s]    = cur_warp_base;
             assign sp_warp_needed[s] = (cur_warp_base < cur_warps_per_block);
         end else begin : gen_multi_sp
@@ -131,55 +135,65 @@ module streaming_multiprocessor #(
                          (rx_state == ST_COMMIT) ? slice_ready : 1'b0;
 
     // Parallel Allocation Ports to all Sub-Partitions
-    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_alloc_ports
+    for (genvar s = 0; s < `NUM_SPS; s = s + 1) begin : gen_alloc_ports
+        wire [15:0] warp_start_thread = sp_warp_idx[s] * 16'(`WARP_SIZE);
+        wire [15:0] remaining_threads = (eff_threads_per_block > warp_start_thread) ?
+                                        (eff_threads_per_block - warp_start_thread) : 16'd0;
+        wire [5:0] warp_active_lanes = (remaining_threads >= 16'(`WARP_SIZE)) ? 6'(`WARP_SIZE) : remaining_threads[5:0];
+        wire [31:0] warp_active_mask = (warp_active_lanes == 6'd0) ? 32'd0 :
+                                       (warp_active_lanes >= 6'd32) ? 32'hFFFFFFFF :
+                                       ((32'd1 << warp_active_lanes) - 32'd1);
+
         assign alloc[s].valid           = active_commit && sp_warp_needed[s];
         assign alloc[s].block_id        = linear_block_id;
         assign alloc[s].block_idx_x     = cur_block_x;
         assign alloc[s].block_idx_y     = cur_block_y;
-        assign alloc[s].thread_id_start = sp_warp_idx[s] * WARP_SIZE;
-        assign alloc[s].active_mask     = {{(32-NUM_LANES){1'b0}}, {NUM_LANES{1'b1}}};
+        assign alloc[s].thread_id_start = warp_start_thread;
+        assign alloc[s].active_mask     = warp_active_mask;
     end
 
     // State machine for CTA Parallel Commit
     always @(posedge clk or negedge sm_rst_n) begin
         if (!sm_rst_n) begin
-            rx_state                 <= ST_IDLE;
-            block_accepted_reg       <= 1'b0;
-            sp_rr_ptr                <= '0;
-            warp_base                <= 10'd0;
-            accepted_block_x         <= 16'd0;
-            accepted_block_y         <= 16'd0;
-            accepted_warps_per_block <= 10'd0;
+            rx_state                   <= ST_IDLE;
+            block_accepted_reg         <= 1'b0;
+            sp_rr_ptr                  <= '0;
+            warp_base                  <= 10'd0;
+            accepted_block_x           <= 16'd0;
+            accepted_block_y           <= 16'd0;
+            accepted_warps_per_block   <= 10'd0;
+            accepted_threads_per_block <= 16'd0;
         end else begin
             case (rx_state)
                 ST_IDLE: begin
                     block_accepted_reg <= 1'b0;
                     if (block_issue_valid && !block_accepted_reg && slice_ready) begin
-                        if (warps_per_block <= 10'(NUM_SPS)) begin
+                        if (warps_per_block <= 10'(`NUM_SPS)) begin
                             // 1-CYCLE PARALLEL COMMIT! All warps absorbed this cycle.
                             block_accepted_reg <= 1'b1;
                             sp_rr_ptr <= sp_rr_ptr + warps_per_block[SP_PTR_W-1:0];
                             rx_state  <= ST_WAIT_DROP;
                         end else begin
                             // Multi-cycle parallel commit (absorbs NUM_SPS warps per cycle)
-                            accepted_block_x         <= block_idx_x;
-                            accepted_block_y         <= block_idx_y;
-                            accepted_warps_per_block <= warps_per_block;
-                            warp_base                <= 10'(NUM_SPS);
-                            rx_state                 <= ST_COMMIT;
+                            accepted_block_x           <= block_idx_x;
+                            accepted_block_y           <= block_idx_y;
+                            accepted_warps_per_block   <= warps_per_block;
+                            accepted_threads_per_block <= threads_per_block;
+                            warp_base                  <= 10'(`NUM_SPS);
+                            rx_state                   <= ST_COMMIT;
                         end
                     end
                 end
 
                 ST_COMMIT: begin
                     if (slice_ready) begin
-                        if (warp_base + 10'(NUM_SPS) >= accepted_warps_per_block) begin
+                        if (warp_base + 10'(`NUM_SPS) >= accepted_warps_per_block) begin
                             // Final slice committed!
                             block_accepted_reg <= 1'b1;
                             sp_rr_ptr <= sp_rr_ptr + accepted_warps_per_block[SP_PTR_W-1:0];
                             rx_state  <= ST_WAIT_DROP;
                         end else begin
-                            warp_base <= warp_base + 10'(NUM_SPS);
+                            warp_base <= warp_base + 10'(`NUM_SPS);
                             rx_state  <= ST_COMMIT;
                         end
                     end
@@ -219,46 +233,55 @@ module streaming_multiprocessor #(
     assign available_warp_slots = available_warp_slots_q;
 
     // SM Idle Status: receiver is ST_IDLE and all sub-partitions have all warp slots free
-    wire [NUM_SPS-1:0] sp_all_free;
-    for (genvar s = 0; s < NUM_SPS; s = s + 1) begin : gen_sp_idle_check
-        assign sp_all_free[s] = (sp_avail_slots[s] == MAX_WARPS[4:0]);
+    wire [`NUM_SPS-1:0] sp_all_free;
+    for (genvar s = 0; s < `NUM_SPS; s = s + 1) begin : gen_sp_idle_check
+        assign sp_all_free[s] = (sp_avail_slots[s] == 5'(`MAX_WARPS));
     end
     assign sm_idle = (rx_state == ST_IDLE) && (&sp_all_free) && !block_issue_valid;
 
 `ifdef ENABLE_GPU_DEBUG
-    wire [PERF_COUNT-1:0] sp_perf_events [0:NUM_SPS-1];
-    wire [PERF_COUNT-1:0] l1_perf_events;
-    reg [31:0] perf_increments_comb [0:PERF_COUNT-1];
+    wire [`PERF_COUNT-1:0] sp_perf_events [0:`NUM_SPS-1];
+    wire [`PERF_COUNT-1:0] l1_perf_events;
+    wire [`PERF_COUNT-1:0] coalesce_perf_events;
+    reg [31:0] perf_increments_comb [0:`PERF_COUNT-1];
     always_comb begin
-        for (int c = 0; c < PERF_COUNT; c++) begin
-            perf_increments_comb[c] = 32'(l1_perf_events[c]);
-            for (int sp = 0; sp < NUM_SPS; sp++)
+        for (int c = 0; c < `PERF_COUNT; c++) begin
+            perf_increments_comb[c] = 32'(l1_perf_events[c]) + 32'(coalesce_perf_events[c]);
+            for (int sp = 0; sp < `NUM_SPS; sp++)
                 perf_increments_comb[c] = perf_increments_comb[c] + 32'(sp_perf_events[sp][c]);
         end
     end
 
     always @(posedge clk or negedge sm_rst_n) begin
         if (!sm_rst_n) begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= 32'd0;
         end else if (perf_clear) begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= 32'd0;
         end else begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
         end
     end
 `endif
     // 2. Sub-Partitions (Compute Blocks)
-    wire [NUM_SPS-1:0]        sp_l1_req_valid;
-    wire [31:0]               sp_l1_req_addr  [0:NUM_SPS-1];
-    wire [DATA_W-1:0]         sp_l1_req_wdata [0:NUM_SPS-1];
-    wire [7:0]               sp_l1_req_wstrb [0:NUM_SPS-1];
-    wire [NUM_SPS-1:0]        sp_l1_req_we;
-    wire [NUM_SPS-1:0]        sp_l1_req_ready;
-    wire [NUM_SPS-1:0]        sp_l1_rsp_valid;
-    wire [DATA_W-1:0]         sp_l1_rsp_rdata [0:NUM_SPS-1];
+    wire [`NUM_SPS-1:0]             sp_mem_req_valid;
+    wire [`NUM_SPS-1:0]             sp_mem_req_is_load;
+    wire [$clog2(`MAX_WARPS)-1:0]   sp_mem_req_warp_id [0:`NUM_SPS-1];
+    wire [4:0]                      sp_mem_req_rd      [0:`NUM_SPS-1];
+    wire [11:0]                     sp_mem_req_pc      [0:`NUM_SPS-1];
+    wire [`NUM_LANES-1:0]           sp_mem_req_mask    [0:`NUM_SPS-1];
+    wire [`WARP_DATA_W-1:0]         sp_mem_req_addr    [0:`NUM_SPS-1];
+    wire [`WARP_DATA_W-1:0]         sp_mem_req_wdata   [0:`NUM_SPS-1];
+    wire [`NUM_SPS-1:0]             sp_mem_req_ready;
 
+    wire [`NUM_SPS-1:0]             sp_mem_rsp_valid;
+    wire [$clog2(`MAX_WARPS)-1:0]   sp_mem_rsp_warp_id [0:`NUM_SPS-1];
+    wire [4:0]                      sp_mem_rsp_rd      [0:`NUM_SPS-1];
+    wire [11:0]                     sp_mem_rsp_pc      [0:`NUM_SPS-1];
+    wire [`NUM_LANES-1:0]           sp_mem_rsp_mask    [0:`NUM_SPS-1];
+    wire [`NUM_SPS-1:0]             sp_mem_rsp_is_load;
+    wire [`WARP_DATA_W-1:0]         sp_mem_rsp_rdata   [0:`NUM_SPS-1];
 
-    for (genvar m = 0; m < NUM_SPS; m = m + 1) begin : gen_sub_partitions
+    for (genvar m = 0; m < `NUM_SPS; m = m + 1) begin : gen_sub_partitions
         sub_partition u_sp (
             .clk           (clk),
             .rst_n         (sm_rst_n),
@@ -270,105 +293,76 @@ module streaming_multiprocessor #(
 
             // Warp Allocation
             .alloc         (alloc[m]),
+            .block_dim_x   (block_dim_x),
             
-            // L1 Request & Response
-            .l1_req_valid  (sp_l1_req_valid[m]),
-            .l1_req_addr   (sp_l1_req_addr[m]),
-            .l1_req_wdata  (sp_l1_req_wdata[m]),
-            .l1_req_wstrb  (sp_l1_req_wstrb[m]),
-            .l1_req_we     (sp_l1_req_we[m]),
-            .l1_req_ready  (sp_l1_req_ready[m]),
-            .l1_rsp_valid  (sp_l1_rsp_valid[m]),
-            .l1_rsp_rdata  (sp_l1_rsp_rdata[m])
+            // Memory Interface to Dynamic Coalescing Engine
+            .mem_req_valid  (sp_mem_req_valid[m]),
+            .mem_req_is_load(sp_mem_req_is_load[m]),
+            .mem_req_warp_id(sp_mem_req_warp_id[m]),
+            .mem_req_rd     (sp_mem_req_rd[m]),
+            .mem_req_pc     (sp_mem_req_pc[m]),
+            .mem_req_mask   (sp_mem_req_mask[m]),
+            .mem_req_addr   (sp_mem_req_addr[m]),
+            .mem_req_wdata  (sp_mem_req_wdata[m]),
+            .mem_req_ready  (sp_mem_req_ready[m]),
+
+            .mem_rsp_valid  (sp_mem_rsp_valid[m]),
+            .mem_rsp_warp_id(sp_mem_rsp_warp_id[m]),
+            .mem_rsp_rd     (sp_mem_rsp_rd[m]),
+            .mem_rsp_pc     (sp_mem_rsp_pc[m]),
+            .mem_rsp_mask   (sp_mem_rsp_mask[m]),
+            .mem_rsp_is_load(sp_mem_rsp_is_load[m]),
+            .mem_rsp_rdata  (sp_mem_rsp_rdata[m])
 `ifdef ENABLE_GPU_DEBUG
             , .perf_clear(perf_clear), .perf_events(sp_perf_events[m])
 `endif
         );
     end
 
+    // 3. SM-Level Dynamic Coalescing Engine
+    wire                     l1_req_valid_int;
+    wire [31:0]              l1_req_addr_int;
+    wire [`DATA_W_L1-1:0]    l1_req_wdata_int;
+    wire [`STRB_W_L1-1:0]    l1_req_wstrb_int;
+    wire                     l1_req_we_int;
+    wire                     l1_req_ready_int;
+    wire                     l1_rsp_valid_int;
+    wire [`DATA_W_L1-1:0]    l1_rsp_rdata_int;
 
-    // 3. M:1 L1 Cache Arbiter & Interconnect
-    wire              l1_req_valid_int;
-    wire [31:0]       l1_req_addr_int;
-    wire [DATA_W-1:0] l1_req_wdata_int;
-    wire [7:0]        l1_req_wstrb_int;
-    wire              l1_req_we_int;
-    wire              l1_req_ready_int;
-    wire              l1_rsp_valid_int;
-    wire [DATA_W-1:0] l1_rsp_rdata_int;
+    dynamic_coalescing_engine u_coalescing_engine (
+        .clk             (clk),
+        .rst_n           (sm_rst_n),
+        
+        .sp_req_valid    (sp_mem_req_valid),
+        .sp_req_is_load  (sp_mem_req_is_load),
+        .sp_req_warp_id  (sp_mem_req_warp_id),
+        .sp_req_rd       (sp_mem_req_rd),
+        .sp_req_pc       (sp_mem_req_pc),
+        .sp_req_mask     (sp_mem_req_mask),
+        .sp_req_addr     (sp_mem_req_addr),
+        .sp_req_wdata    (sp_mem_req_wdata),
+        .sp_req_ready    (sp_mem_req_ready),
 
-    generate
-        if (NUM_SPS == 1) begin : gen_l1_arb_single
-            assign l1_req_valid_int    = sp_l1_req_valid[0];
-            assign l1_req_addr_int     = sp_l1_req_addr[0];
-            assign l1_req_wdata_int    = sp_l1_req_wdata[0];
-            assign l1_req_we_int       = sp_l1_req_we[0];
-            assign l1_req_wstrb_int = sp_l1_req_wstrb[0];
-            assign sp_l1_req_ready[0]  = l1_req_ready_int;
-            assign sp_l1_rsp_valid[0]  = l1_rsp_valid_int;
-            assign sp_l1_rsp_rdata[0]  = l1_rsp_rdata_int;
-        end else begin : gen_l1_arb_multi
-            localparam ARB_IDLE = 1'b0;
-            localparam ARB_BUSY = 1'b1;
+        .sp_rsp_valid    (sp_mem_rsp_valid),
+        .sp_rsp_warp_id  (sp_mem_rsp_warp_id),
+        .sp_rsp_rd       (sp_mem_rsp_rd),
+        .sp_rsp_pc       (sp_mem_rsp_pc),
+        .sp_rsp_mask     (sp_mem_rsp_mask),
+        .sp_rsp_is_load  (sp_mem_rsp_is_load),
+        .sp_rsp_rdata    (sp_mem_rsp_rdata),
 
-            reg arb_state;
-            reg [$clog2(NUM_SPS)-1:0] current_client;
-            reg [$clog2(NUM_SPS)-1:0] rr_ptr;
-
-            // Round-robin selection
-            reg [$clog2(NUM_SPS)-1:0] sel_client;
-            reg client_found;
-
-            always @(*) begin
-                sel_client   = rr_ptr;
-                client_found = 1'b0;
-                for (int c = 0; c < NUM_SPS; c = c + 1) begin
-                    int idx;
-                    idx = (32'(rr_ptr) + c) % NUM_SPS;
-                    if (!client_found && sp_l1_req_valid[idx]) begin
-                        sel_client   = idx[$clog2(NUM_SPS)-1:0];
-                        client_found = 1'b1;
-                    end
-                end
-            end
-
-            assign l1_req_valid_int = (arb_state == ARB_IDLE) && client_found;
-            assign l1_req_addr_int  = sp_l1_req_addr[sel_client];
-            assign l1_req_wdata_int = sp_l1_req_wdata[sel_client];
-            assign l1_req_wstrb_int = sp_l1_req_wstrb[sel_client];
-            assign l1_req_we_int    = sp_l1_req_we[sel_client];
-
-            for (genvar c = 0; c < NUM_SPS; c = c + 1) begin : gen_sp_ready_rsp
-                assign sp_l1_req_ready[c] = (arb_state == ARB_IDLE) && client_found && (sel_client == c) && l1_req_ready_int;
-                assign sp_l1_rsp_valid[c] = (arb_state == ARB_BUSY) && (current_client == c) && l1_rsp_valid_int;
-                assign sp_l1_rsp_rdata[c] = l1_rsp_rdata_int;
-            end
-
-            always @(posedge clk or negedge sm_rst_n) begin
-                if (!sm_rst_n) begin
-                    arb_state      <= ARB_IDLE;
-                    current_client <= '0;
-                    rr_ptr         <= '0;
-                end else begin
-                    case (arb_state)
-                        ARB_IDLE: begin
-                            if (client_found && l1_req_ready_int) begin
-                                current_client <= sel_client;
-                                rr_ptr         <= $clog2(NUM_SPS)'((32'(sel_client) + 1) % NUM_SPS);
-                                arb_state      <= ARB_BUSY;
-                            end
-                        end
-
-                        ARB_BUSY: begin
-                            if (l1_rsp_valid_int) begin
-                                arb_state <= ARB_IDLE;
-                            end
-                        end
-                    endcase
-                end
-            end
-        end
-    endgenerate
+        .l1_req_valid    (l1_req_valid_int),
+        .l1_req_addr     (l1_req_addr_int),
+        .l1_req_wdata    (l1_req_wdata_int),
+        .l1_req_wstrb    (l1_req_wstrb_int),
+        .l1_req_we       (l1_req_we_int),
+        .l1_req_ready    (l1_req_ready_int),
+        .l1_rsp_valid    (l1_rsp_valid_int),
+        .l1_rsp_rdata    (l1_rsp_rdata_int)
+`ifdef ENABLE_GPU_DEBUG
+        , .perf_events   (coalesce_perf_events)
+`endif
+    );
 
     // 4. L1 Data Cache (Shared at SM Level)
     l1_cache u_l1_cache (
