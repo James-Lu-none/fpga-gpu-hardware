@@ -59,8 +59,9 @@ module dynamic_coalescing_engine (
 );
 
     localparam ST_IDLE  = 2'd0;
-    localparam ST_ISSUE = 2'd1;
-    localparam ST_WAIT  = 2'd2;
+    localparam ST_COAL  = 2'd1;
+    localparam ST_ISSUE = 2'd2;
+    localparam ST_WAIT  = 2'd3;
 
     localparam SP_IDX_W       = (`NUM_SPS > 1) ? $clog2(`NUM_SPS) : 1;
     localparam LANE_IDX_W     = (`NUM_LANES > 1) ? $clog2(`NUM_LANES) : 1;
@@ -240,21 +241,26 @@ module dynamic_coalescing_engine (
                             active_wdata     <= sp_req_wdata[sel_sp];
                             pending_lanes    <= sp_req_mask[sel_sp];
 
-                            state            <= ST_ISSUE;
+                            state            <= ST_COAL;
                         end
                     end
                 end
 
+                ST_COAL: begin
+                    // Pipeline Stage 1: Evaluate next coalesced line address & lane mask
+                    l1_req_addr      <= {active_addr[32'(next_base_lane)*32 + OFFSET_BITS +: TAG_BITS], {OFFSET_BITS{1'b0}}};
+                    l1_req_we        <= !active_is_load;
+                    active_coal_mask <= next_coal_mask;
+                    pending_lanes    <= pending_lanes & ~next_coal_mask;
+                    state            <= ST_ISSUE;
+                end
+
                 ST_ISSUE: begin
+                    // Pipeline Stage 2: Evaluate word muxes and issue to L1 cache
                     if (!l1_req_valid) begin
-                        // Dispatch next coalesced line from active_addr
-                        l1_req_addr      <= {active_addr[32'(next_base_lane)*32 + OFFSET_BITS +: TAG_BITS], {OFFSET_BITS{1'b0}}};
-                        l1_req_we        <= !active_is_load;
-                        l1_req_wstrb     <= compute_line_wstrb(next_coal_mask, active_addr);
-                        l1_req_wdata     <= compute_line_wdata(next_coal_mask, active_addr, active_wdata);
+                        l1_req_wstrb     <= compute_line_wstrb(active_coal_mask, active_addr);
+                        l1_req_wdata     <= compute_line_wdata(active_coal_mask, active_addr, active_wdata);
                         l1_req_valid     <= 1'b1;
-                        active_coal_mask <= next_coal_mask;
-                        pending_lanes    <= pending_lanes & ~next_coal_mask;
                     end else if (l1_req_ready) begin
                         l1_req_valid <= 1'b0;
                         state        <= ST_WAIT;
@@ -275,8 +281,8 @@ module dynamic_coalescing_engine (
                         end
 
                         if (pending_lanes != '0) begin
-                            // Divergent memory accesses: loop back to issue remaining lines
-                            state <= ST_ISSUE;
+                            // Divergent memory accesses: loop back to evaluate remaining lines
+                            state <= ST_COAL;
                         end else begin
                             // All lanes satisfied: assemble writeback response to Sub-Partition
                             sp_rsp_valid[active_sp]   <= 1'b1;
