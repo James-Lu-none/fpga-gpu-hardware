@@ -37,6 +37,7 @@ puts "=== Synthesis completed successfully ==="
 
 puts "=== Resetting and Launching impl_1 (route_design, jobs=$jobs) ==="
 reset_run impl_1
+set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE RuntimeOptimized [get_runs impl_1]
 launch_runs impl_1 -to_step route_design -jobs $jobs
 wait_on_run impl_1
 if {![string match "*route_design Complete*" [get_property STATUS [get_runs impl_1]]]} {
