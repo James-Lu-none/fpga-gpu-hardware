@@ -64,15 +64,16 @@ module streaming_multiprocessor (
     localparam ST_COMMIT    = 3'd1;
     localparam ST_WAIT_DROP = 3'd2;
 
-    reg [2:0]  rx_state;
+    (* max_fanout = 16 *) reg [2:0]  rx_state;
     reg [15:0] accepted_block_x;
     reg [15:0] accepted_block_y;
     reg [9:0]  accepted_warps_per_block;
+    reg [9:0]  accepted_last_warp_idx;
     reg [9:0]  warp_base;
-    reg        block_accepted_reg;
+    (* max_fanout = 16 *) reg        block_accepted_reg;
 
     localparam SP_PTR_W = (`NUM_SPS > 1) ? $clog2(`NUM_SPS) : 1;
-    reg [SP_PTR_W-1:0] sp_rr_ptr;
+    (* max_fanout = 16 *) reg [SP_PTR_W-1:0] sp_rr_ptr;
 
     warp_alloc_if alloc [0:`NUM_SPS-1]();
 
@@ -104,15 +105,26 @@ module streaming_multiprocessor (
     endgenerate
 
     // Current block coordinates and dimensions (pass-through in IDLE for 1-cycle commit)
-    reg [15:0] accepted_threads_per_block;
     wire [15:0] cur_block_x = (rx_state == ST_IDLE) ? block_idx_x : accepted_block_x;
     wire [15:0] cur_block_y = (rx_state == ST_IDLE) ? block_idx_y : accepted_block_y;
     wire [9:0]  cur_warps_per_block = (rx_state == ST_IDLE) ? warps_per_block : accepted_warps_per_block;
-    wire [15:0] cur_threads_per_block = (rx_state == ST_IDLE) ? threads_per_block : accepted_threads_per_block;
-    wire [15:0] eff_threads_per_block = (cur_threads_per_block != 16'd0) ? cur_threads_per_block :
-                                        (16'(cur_warps_per_block) * 16'(`WARP_SIZE));
-    wire [9:0]  cur_warp_base = (rx_state == ST_IDLE) ? 10'd0 : warp_base;
-    wire [15:0] linear_block_id = cur_block_x + (cur_block_y * 16'd65535);
+    wire [9:0]  idle_last_warp_idx  = (warps_per_block == 10'd0) ? 10'd0 : (warps_per_block - 10'd1);
+    wire [9:0]  last_warp_idx       = (rx_state == ST_IDLE) ? idle_last_warp_idx : accepted_last_warp_idx;
+
+    // Register last_warp_lane_mask to break timing path from GPC control register
+    reg [`NUM_LANES-1:0] last_warp_lane_mask;
+    always @(posedge clk or negedge sm_rst_n) begin
+        if (!sm_rst_n) begin
+            last_warp_lane_mask <= {`NUM_LANES{1'b1}};
+        end else begin
+            for (integer l = 0; l < `NUM_LANES; l = l + 1) begin
+                last_warp_lane_mask[l] <= (threads_per_block[3:0] == 4'd0) || (4'(l) < threads_per_block[3:0]);
+            end
+        end
+    end
+
+    wire [9:0]  cur_warp_base = warp_base;
+    wire [15:0] linear_block_id = {cur_block_y[7:0], cur_block_x[7:0]};
 
     // Parallel Routing: Map up to NUM_SPS warps to sub-partitions starting at sp_rr_ptr
     wire [9:0]           sp_warp_idx   [0:`NUM_SPS-1];
@@ -136,13 +148,16 @@ module streaming_multiprocessor (
 
     // Parallel Allocation Ports to all Sub-Partitions
     for (genvar s = 0; s < `NUM_SPS; s = s + 1) begin : gen_alloc_ports
-        wire [15:0] warp_start_thread = sp_warp_idx[s] * 16'(`WARP_SIZE);
-        wire [15:0] remaining_threads = (eff_threads_per_block > warp_start_thread) ?
-                                        (eff_threads_per_block - warp_start_thread) : 16'd0;
-        wire [5:0] warp_active_lanes = (remaining_threads >= 16'(`WARP_SIZE)) ? 6'(`WARP_SIZE) : remaining_threads[5:0];
-        wire [31:0] warp_active_mask = (warp_active_lanes == 6'd0) ? 32'd0 :
-                                       (warp_active_lanes >= 6'd32) ? 32'hFFFFFFFF :
-                                       ((32'd1 << warp_active_lanes) - 32'd1);
+        wire [15:0] warp_start_thread = 16'(sp_warp_idx[s]) << $clog2(`WARP_SIZE);
+        wire is_full_warp = (sp_warp_idx[s] < last_warp_idx);
+        wire is_last_warp = (sp_warp_idx[s] == last_warp_idx);
+        wire [31:0] warp_active_mask;
+        for (genvar l = 0; l < `NUM_LANES; l = l + 1) begin : gen_lane_mask
+            assign warp_active_mask[l] = is_full_warp || (is_last_warp && last_warp_lane_mask[l]);
+        end
+        if (`NUM_LANES < 32) begin : gen_upper_mask
+            assign warp_active_mask[31:`NUM_LANES] = '0;
+        end
 
         assign alloc[s].valid           = active_commit && sp_warp_needed[s];
         assign alloc[s].block_id        = linear_block_id;
@@ -162,7 +177,7 @@ module streaming_multiprocessor (
             accepted_block_x           <= 16'd0;
             accepted_block_y           <= 16'd0;
             accepted_warps_per_block   <= 10'd0;
-            accepted_threads_per_block <= 16'd0;
+            accepted_last_warp_idx     <= 10'd0;
         end else begin
             case (rx_state)
                 ST_IDLE: begin
@@ -178,7 +193,7 @@ module streaming_multiprocessor (
                             accepted_block_x           <= block_idx_x;
                             accepted_block_y           <= block_idx_y;
                             accepted_warps_per_block   <= warps_per_block;
-                            accepted_threads_per_block <= threads_per_block;
+                            accepted_last_warp_idx     <= idle_last_warp_idx;
                             warp_base                  <= 10'(`NUM_SPS);
                             rx_state                   <= ST_COMMIT;
                         end
@@ -201,6 +216,7 @@ module streaming_multiprocessor (
 
                 ST_WAIT_DROP: begin
                     block_accepted_reg <= 1'b0;
+                    warp_base          <= 10'd0;
                     rx_state           <= ST_IDLE;
                 end
 
