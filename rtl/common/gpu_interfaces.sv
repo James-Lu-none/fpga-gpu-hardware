@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 interface warp_alloc_if;
     logic valid;
@@ -24,7 +24,7 @@ endinterface
 
 interface issue_if;
     logic valid;
-    logic [$clog2(MAX_WARPS)-1:0] warp_id;
+    logic [$clog2(`MAX_WARPS)-1:0] warp_id;
     logic [11:0] pc;
     logic [31:0] active_mask;
     logic [15:0] block_idx_x;
@@ -37,7 +37,7 @@ endinterface
 
 interface decode_if;
     logic valid;
-    logic [$clog2(MAX_WARPS)-1:0] warp_id;
+    logic [$clog2(`MAX_WARPS)-1:0] warp_id;
     logic [11:0] pc;
     logic [31:0] active_mask;
     logic [15:0] block_idx_x;
@@ -63,7 +63,7 @@ endinterface
 
 interface operand_if;
     logic valid;
-    logic [$clog2(MAX_WARPS)-1:0] warp_id;
+    logic [$clog2(`MAX_WARPS)-1:0] warp_id;
     logic [11:0] pc;
     logic [31:0] active_mask;
     logic [15:0] block_idx_x;
@@ -75,8 +75,8 @@ interface operand_if;
     logic [31:0] imm;
     logic is_imm;
     
-    logic [DATA_W-1:0] rs1_data;
-    logic [DATA_W-1:0] rs2_data;
+    logic [`WARP_DATA_W-1:0] rs1_data;
+    logic [`WARP_DATA_W-1:0] rs2_data;
     
     modport master (
         output valid, warp_id, pc, active_mask, block_idx_x, block_idx_y, thread_id_start,
@@ -90,9 +90,9 @@ endinterface
 
 interface wb_if;
     logic valid;
-    logic [$clog2(MAX_WARPS)-1:0] warp_id;
+    logic [$clog2(`MAX_WARPS)-1:0] warp_id;
     logic [4:0] rd;
-    logic [DATA_W-1:0] data;
+    logic [`WARP_DATA_W-1:0] data;
     logic [31:0] mask;
     
     modport master (output valid, warp_id, rd, data, mask);
@@ -101,7 +101,7 @@ endinterface
 
 interface ctx_wb_if;
     logic valid;
-    logic [$clog2(MAX_WARPS)-1:0] warp_id;
+    logic [$clog2(`MAX_WARPS)-1:0] warp_id;
     logic [11:0] next_pc;
     logic is_done;
     logic is_divergent;
