@@ -159,8 +159,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, cl_uint dims, con
     size_t local_y = dims == 2 ? local[1] : 1;
     if (offset && (offset[0] || (dims == 2 && offset[1]))) return CL_INVALID_GLOBAL_OFFSET;
     if (n || wait || event) return CL_INVALID_EVENT_WAIT_LIST;
-    if (local[0] != 2 || local_y != 1) return CL_INVALID_WORK_GROUP_SIZE;
-    if (!global[0] || !global_y || global[0] % 2 || global[0] > 131070 || global_y > 65535)
+    if (local[0] < 1 || local_y < 1 || (local[0] * local_y) > 1024) return CL_INVALID_WORK_GROUP_SIZE;
+    if (!global[0] || !global_y || (global[0] % local[0]) != 0 || (global_y % local_y) != 0 || global[0] > 131070 || global_y > 65535)
         return CL_INVALID_GLOBAL_WORK_SIZE;
     for (unsigned i = 0; i < k->count; i++) {
         if (!k->set[i]) return CL_INVALID_KERNEL_ARGS;
@@ -169,7 +169,8 @@ cl_int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, cl_uint dims, con
     }
     FILE *f = fopen("kernel.c", "w");
     if (!f) return CL_OUT_OF_RESOURCES;
-    int failed = fprintf(f, "#include \"device_intrinsics.h\"\n%s", k->program->source) < 0;
+    int failed = fprintf(f, "#define BLOCK_DIM_X %zu\n#define BLOCK_DIM_Y %zu\n#include \"device_intrinsics.h\"\n%s",
+                         local[0], local_y, k->program->source) < 0;
     failed |= fclose(f) != 0;
     if (failed) return CL_OUT_OF_RESOURCES;
     f = fopen("memory.hex", "w");

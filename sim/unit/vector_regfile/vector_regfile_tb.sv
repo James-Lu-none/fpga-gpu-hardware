@@ -1,18 +1,18 @@
 `timescale 1ns / 1ps
+`include "gpu_defines.vh"
 module vector_regfile_tb;
-    import gpu_pkg::*;
     reg clk = 0, rst_n = 0;
     always #4 clk = !clk;
     decode_if decode();
     operand_if op();
     wb_if wb();
     vector_regfile dut(.clk(clk), .rst_n(rst_n), .decode(decode), .op(op), .wb(wb));
-    reg [63:0] golden [0:MAX_WARPS-1][0:NUM_REGS-1];
+    reg [63:0] golden [0:`MAX_WARPS-1][0:`NUM_REGS-1];
     typedef struct packed {
         logic [63:0] rs1, rs2;
         logic [31:0] tag, mask;
         logic [7:0] opcode;
-        logic [$clog2(MAX_WARPS)-1:0] warp;
+        logic [$clog2(`MAX_WARPS)-1:0] warp;
         logic [11:0] pc;
         logic [31:0] cycle;
     } expected_t;
@@ -54,14 +54,14 @@ module vector_regfile_tb;
                 issued++;
             end
             if (wb.valid && wb.rd != 0)
-                for (int lane = 0; lane < NUM_LANES; lane++)
+                for (int lane = 0; lane < `NUM_LANES; lane++)
                     if (wb.mask[lane]) golden[wb.warp_id][wb.rd][lane*32 +: 32] = wb.data[lane*32 +: 32];
         end
     end
     task automatic write_reg(input integer warp, rd, mask, input [63:0] data);
         @(negedge clk);
         wb.valid = 1;
-        wb.warp_id = $clog2(MAX_WARPS)'(warp);
+        wb.warp_id = $clog2(`MAX_WARPS)'(warp);
         wb.rd = 5'(rd);
         wb.mask = 32'(mask);
         wb.data = data;
@@ -69,11 +69,11 @@ module vector_regfile_tb;
     task automatic read_stream(input bit same_register);
         @(negedge clk); wb.valid = 0;
         repeat (3) @(negedge clk);
-        for (int w = 0; w < MAX_WARPS; w++)
-            for (int r = 0; r < NUM_REGS; r++) begin
+        for (int w = 0; w < `MAX_WARPS; w++)
+            for (int r = 0; r < `NUM_REGS; r++) begin
                 @(negedge clk);
                 decode.valid = 1;
-                decode.warp_id = $clog2(MAX_WARPS)'(w);
+                decode.warp_id = $clog2(`MAX_WARPS)'(w);
                 decode.rs1 = 5'(r);
                 decode.rs2 = same_register ? 5'(r) : 5'(31-r);
                 decode.pc = 12'(w*32+r);
@@ -91,8 +91,8 @@ module vector_regfile_tb;
         decode.pc = 0; decode.imm = 0; decode.opcode = 0; decode.rd = 0;
         decode.active_mask = 0; decode.is_imm = 0;
         decode.block_idx_x = 0; decode.block_idx_y = 0; decode.thread_id_start = 0;
-        for (int w = 0; w < MAX_WARPS; w++)
-            for (int r = 0; r < NUM_REGS; r++) golden[w][r] = 0;
+        for (int w = 0; w < `MAX_WARPS; w++)
+            for (int r = 0; r < `NUM_REGS; r++) golden[w][r] = 0;
         repeat (5) @(negedge clk);
         rst_n = 1;
         if ($test$plusargs("expect_bank_conflict")) begin
@@ -101,12 +101,12 @@ module vector_regfile_tb;
             repeat (3) @(negedge clk);
             $fatal(1, "Bank conflict was not detected");
         end
-        for (int w = 0; w < MAX_WARPS; w++)
-            for (int r = 1; r < NUM_REGS; r++)
+        for (int w = 0; w < `MAX_WARPS; w++)
+            for (int r = 1; r < `NUM_REGS; r++)
                 write_reg(w, r, 3, {32'h89ab0000 | 32'(w*32+r), 32'h13570000 | 32'(w*32+r)});
         read_stream(0);
-        for (int w = 0; w < MAX_WARPS; w++) begin
-            for (int r = 1; r < NUM_REGS; r++) begin
+        for (int w = 0; w < `MAX_WARPS; w++) begin
+            for (int r = 1; r < `NUM_REGS; r++) begin
                 write_reg(w, r, 1, {32'hdeadbeef, 32'h24680000 | 32'(w*32+r)});
                 write_reg(w, r, 2, {32'h56780000 | 32'(w*32+r), 32'hdeadbeef});
                 write_reg(w, r, 0, 64'hdeadbeefdeadbeef);

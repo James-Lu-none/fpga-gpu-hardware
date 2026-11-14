@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 module gpc_top_tb;
     reg clk = 0;
     real clock_hz = 125000000.0;
@@ -148,8 +148,8 @@ module gpc_top_tb;
     reg [1:0] prev_tbs_state;
     reg prev_all_idle;
     reg prev_grid_done;
-    reg [NUM_SMS-1:0] prev_sm_issue_valid;
-    reg [NUM_SMS-1:0] prev_sm_accepted;
+    reg [`NUM_SMS-1:0] prev_sm_issue_valid;
+    reg [`NUM_SMS-1:0] prev_sm_accepted;
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -169,8 +169,8 @@ module gpc_top_tb;
                 $display("[Cycle %0d] [ASSERT] TBS: all_idle ASSERTED! (state=%s, sm0_slots=%0d, sm1_slots=%0d, MAX_WARPS=%0d)",
                          cycles, tbs_state_name(dut.u_scheduler.state),
                          dut.gen_sm_array[0].u_sm.available_warp_slots,
-                         (NUM_SMS > 1 ? dut.gen_sm_array[1].u_sm.available_warp_slots : 5'd0),
-                         gpu_pkg::MAX_WARPS);
+                         (`NUM_SMS > 1 ? dut.gen_sm_array[1].u_sm.available_warp_slots : 5'd0),
+                         `MAX_WARPS);
             end
             prev_all_idle <= dut.u_scheduler.all_idle;
 
@@ -179,7 +179,7 @@ module gpc_top_tb;
             end
             prev_grid_done <= dut.u_scheduler.grid_done;
 
-            for (int s = 0; s < NUM_SMS; s++) begin
+            for (int s = 0; s < `NUM_SMS; s++) begin
                 if (!prev_sm_issue_valid[s] && dut.u_scheduler.sm_block_issue_valid[s]) begin
                     $display("[Cycle %0d] [ASSERT] TBS -> SM%0d: sm_block_issue_valid ASSERTED (block=[%0d,%0d], warps=%0d)",
                              cycles, s, dut.u_scheduler.sm_block_idx_x, dut.u_scheduler.sm_block_idx_y, dut.u_scheduler.sm_warps_per_block);
@@ -194,7 +194,7 @@ module gpc_top_tb;
     end
 
     // SM & SP Arbiter / Allocation Monitors
-    for (genvar sm = 0; sm < NUM_SMS; sm++) begin : mon_sm_block
+    for (genvar sm = 0; sm < `NUM_SMS; sm++) begin : mon_sm_block
         reg [2:0] prev_rx_state;
         reg prev_block_accepted;
         reg prev_alloc_valid;
@@ -309,59 +309,55 @@ module gpc_top_tb;
             end
         end
 
-        // Multi-SP specific monitors (gen_alloc_target_multi and gen_l1_arb_multi)
-        if (NUM_SUB_PARTITIONS > 1) begin : mon_multi
-            reg prev_arb_state;
-            reg [$clog2(NUM_SUB_PARTITIONS)-1:0] prev_current_client;
-            reg [$clog2(NUM_SUB_PARTITIONS)-1:0] prev_rr_ptr;
+        // Multi-SP specific monitors (gen_alloc_target_multi and Dynamic Coalescing Engine)
+        if (`NUM_SUB_PARTITIONS > 1) begin : mon_multi
+            reg [1:0] prev_engine_state;
+            reg [$clog2(`NUM_SUB_PARTITIONS)-1:0] prev_active_sp;
+            reg [$clog2(`NUM_SUB_PARTITIONS)-1:0] prev_rr_ptr;
             reg prev_client_found;
 
             always @(posedge clk) begin
                 if (!rst_n) begin
-                    prev_arb_state      <= 1'b0;
-                    prev_current_client <= '0;
+                    prev_engine_state   <= 2'd0;
+                    prev_active_sp      <= '0;
                     prev_rr_ptr         <= '0;
                     prev_client_found   <= 1'b0;
                 end else if (trace_arbiter) begin
-                    if (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state != prev_arb_state) begin
-                        $display("[Cycle %0d] [L1_ARB_STATE] SM%0d: arb_state %s -> %s (current_client=%0d, sel_client=%0d, found=%b, rr_ptr=%0d, req_ready_int=%b, rsp_valid_int=%b)",
+                    if (dut.gen_sm_array[sm].u_sm.u_coalescing_engine.state != prev_engine_state) begin
+                        $display("[Cycle %0d] [COALESCE_STATE] SM%0d: state %s -> %s (active_sp=%0d, sel_sp=%0d, found=%b, rr_ptr=%0d)",
                                  cycles, sm,
-                                 (prev_arb_state ? "ARB_BUSY" : "ARB_IDLE"),
-                                 (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state ? "ARB_BUSY" : "ARB_IDLE"),
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client,
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.sel_client,
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found,
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr,
-                                 dut.gen_sm_array[sm].u_sm.l1_req_ready_int,
-                                 dut.gen_sm_array[sm].u_sm.l1_rsp_valid_int);
-                        prev_arb_state <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state;
+                                 lsu_state_name(prev_engine_state),
+                                 lsu_state_name(dut.gen_sm_array[sm].u_sm.u_coalescing_engine.state),
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.active_sp,
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.sel_sp,
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.client_found,
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.rr_ptr);
+                        prev_engine_state <= dut.gen_sm_array[sm].u_sm.u_coalescing_engine.state;
                     end
-                    if (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client != prev_current_client) begin
-                        $display("[Cycle %0d] [L1_ARB_CLIENT] SM%0d: current_client %0d -> %0d (rr_ptr=%0d)",
-                                 cycles, sm, prev_current_client,
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client,
-                                 dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr);
-                        prev_current_client <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.current_client;
+                    if (dut.gen_sm_array[sm].u_sm.u_coalescing_engine.active_sp != prev_active_sp) begin
+                        $display("[Cycle %0d] [COALESCE_CLIENT] SM%0d: active_sp %0d -> %0d (rr_ptr=%0d)",
+                                 cycles, sm, prev_active_sp,
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.active_sp,
+                                 dut.gen_sm_array[sm].u_sm.u_coalescing_engine.rr_ptr);
+                        prev_active_sp <= dut.gen_sm_array[sm].u_sm.u_coalescing_engine.active_sp;
                     end
-                    if (!prev_client_found && dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found) begin
-                        $display("[Cycle %0d] [ASSERT] SM%0d L1 Arbiter: client_found ASSERTED (sel_client=%0d, l1_req_ready_int=%b, arb_state=%s)",
-                                 cycles, sm, dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.sel_client,
-                                 dut.gen_sm_array[sm].u_sm.l1_req_ready_int,
-                                 (dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.arb_state ? "ARB_BUSY" : "ARB_IDLE"));
+                    if (!prev_client_found && dut.gen_sm_array[sm].u_sm.u_coalescing_engine.client_found) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d Coalesce Engine: client_found ASSERTED (sel_sp=%0d)",
+                                 cycles, sm, dut.gen_sm_array[sm].u_sm.u_coalescing_engine.sel_sp);
                     end
-                    prev_client_found <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.client_found;
-                    prev_rr_ptr       <= dut.gen_sm_array[sm].u_sm.gen_l1_arb_multi.rr_ptr;
+                    prev_client_found <= dut.gen_sm_array[sm].u_sm.u_coalescing_engine.client_found;
+                    prev_rr_ptr       <= dut.gen_sm_array[sm].u_sm.u_coalescing_engine.rr_ptr;
                 end
             end
         end
 
         // SP-level monitors
-        for (genvar sp = 0; sp < NUM_SUB_PARTITIONS; sp++) begin : mon_sp_block
+        for (genvar sp = 0; sp < `NUM_SUB_PARTITIONS; sp++) begin : mon_sp_block
             reg prev_sp_alloc_valid;
             reg [4:0] prev_sp_avail_slots;
             reg prev_sp_req_valid;
             reg prev_sp_rsp_valid;
-            reg [1:0] prev_lsu_state;
+            reg [$clog2(`MAX_WARPS+1)-1:0] prev_fifo_count;
 
             always @(posedge clk) begin
                 if (!rst_n) begin
@@ -369,7 +365,7 @@ module gpc_top_tb;
                     prev_sp_avail_slots  <= 5'd0;
                     prev_sp_req_valid    <= 1'b0;
                     prev_sp_rsp_valid    <= 1'b0;
-                    prev_lsu_state       <= 2'd0;
+                    prev_fifo_count      <= '0;
                 end else if (trace_arbiter) begin
                     // SP allocation valid assertion
                     if (!prev_sp_alloc_valid && dut.gen_sm_array[sm].u_sm.alloc[sp].valid) begin
@@ -398,41 +394,38 @@ module gpc_top_tb;
                         prev_sp_avail_slots <= dut.gen_sm_array[sm].u_sm.sp_avail_slots[sp];
                     end
 
-                    // SP L1 request valid assertion
-                    if (!prev_sp_req_valid && dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp]) begin
-                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d: sp_l1_req_valid ASSERTED (addr=0x%08h, we=%b, wstrb=0x%02h, wdata=0x%08h, ready=%b)",
-                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_req_addr[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_we[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_wstrb[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_wdata[sp][31:0],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp]);
+                    // SP memory request valid assertion
+                    if (!prev_sp_req_valid && dut.gen_sm_array[sm].u_sm.sp_mem_req_valid[sp]) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d: sp_mem_req_valid ASSERTED (addr=0x%08h, is_load=%b, ready=%b)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_mem_req_addr[sp][31:0],
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_req_is_load[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_req_ready[sp]);
                     end
-                    // SP L1 request handshake
-                    if (dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp] && dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp]) begin
-                        $display("[Cycle %0d] [HANDSHAKE] SM%0d SP%0d -> L1: REQ HANDSHAKE FIRE! (addr=0x%08h, we=%b)",
-                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_req_addr[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_we[sp]);
+                    // SP memory request handshake
+                    if (dut.gen_sm_array[sm].u_sm.sp_mem_req_valid[sp] && dut.gen_sm_array[sm].u_sm.sp_mem_req_ready[sp]) begin
+                        $display("[Cycle %0d] [HANDSHAKE] SM%0d SP%0d -> Coalescer: REQ HANDSHAKE FIRE! (addr=0x%08h, is_load=%b)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_mem_req_addr[sp][31:0],
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_req_is_load[sp]);
                     end
-                    prev_sp_req_valid <= dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp];
+                    prev_sp_req_valid <= dut.gen_sm_array[sm].u_sm.sp_mem_req_valid[sp];
 
-                    // SP L1 response valid assertion
-                    if (!prev_sp_rsp_valid && dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp]) begin
-                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d <- L1: sp_l1_rsp_valid ASSERTED (rdata=0x%08h)",
-                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_l1_rsp_rdata[sp][31:0]);
+                    // SP memory response valid assertion
+                    if (!prev_sp_rsp_valid && dut.gen_sm_array[sm].u_sm.sp_mem_rsp_valid[sp]) begin
+                        $display("[Cycle %0d] [ASSERT] SM%0d SP%0d <- Coalescer: sp_mem_rsp_valid ASSERTED (rdata=0x%08h)",
+                                 cycles, sm, sp, dut.gen_sm_array[sm].u_sm.sp_mem_rsp_rdata[sp][31:0]);
                     end
-                    prev_sp_rsp_valid <= dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp];
+                    prev_sp_rsp_valid <= dut.gen_sm_array[sm].u_sm.sp_mem_rsp_valid[sp];
 
-                    // LSU State
-                    if (dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state != prev_lsu_state) begin
-                        $display("[Cycle %0d] [LSU_STATE] SM%0d SP%0d: %s -> %s (fifo_cnt=%0d, req_valid=%b, req_ready=%b, rsp_valid=%b)",
+                    // LSU FIFO count monitor
+                    if (dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.fifo_count != prev_fifo_count) begin
+                        $display("[Cycle %0d] [LSU_FIFO] SM%0d SP%0d: fifo_cnt %0d -> %0d (req_valid=%b, req_ready=%b, rsp_valid=%b)",
                                  cycles, sm, sp,
-                                 lsu_state_name(prev_lsu_state),
-                                 lsu_state_name(dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state),
+                                 prev_fifo_count,
                                  dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.fifo_count,
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_valid[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_req_ready[sp],
-                                 dut.gen_sm_array[sm].u_sm.sp_l1_rsp_valid[sp]);
-                        prev_lsu_state <= dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.state;
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_req_valid[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_req_ready[sp],
+                                 dut.gen_sm_array[sm].u_sm.sp_mem_rsp_valid[sp]);
+                        prev_fifo_count <= dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.u_sp_dpath.u_lsu.fifo_count;
                     end
                 end
             end
@@ -466,25 +459,25 @@ module gpc_top_tb;
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    reg [31:0] counters [0:PERF_COUNT-1];
+    reg [31:0] counters [0:`PERF_COUNT-1];
     reg [31:0] first_retired;
     integer counter_fd;
     integer observed_issue = 0, observed_retired = 0, observed_divergence = 0;
     reg observing = 0;
-    wire [NUM_SMS*NUM_SUB_PARTITIONS-1:0] observed_issue_pulse, observed_retire_pulse, observed_divergence_pulse;
-    for (genvar sm = 0; sm < NUM_SMS; sm++) begin : perf_monitor_sm
-        for (genvar sp = 0; sp < NUM_SUB_PARTITIONS; sp++) begin : perf_monitor_sp
-            assign observed_issue_pulse[sm*NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.issue.valid;
+    wire [`NUM_SMS*`NUM_SUB_PARTITIONS-1:0] observed_issue_pulse, observed_retire_pulse, observed_divergence_pulse;
+    for (genvar sm = 0; sm < `NUM_SMS; sm++) begin : perf_monitor_sm
+        for (genvar sp = 0; sp < `NUM_SUB_PARTITIONS; sp++) begin : perf_monitor_sp
+            assign observed_issue_pulse[sm*`NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.issue.valid;
             always @(posedge clk) begin
                 if ($test$plusargs("trace_alloc") && dut.gen_sm_array[sm].u_sm.alloc[sp].valid && dut.gen_sm_array[sm].u_sm.alloc[sp].ready)
                     $display("ALLOC sm=%0d sp=%0d group=%0d,%0d", sm, sp,
                         dut.gen_sm_array[sm].u_sm.alloc[sp].block_idx_x,
                         dut.gen_sm_array[sm].u_sm.alloc[sp].block_idx_y);
             end
-            assign observed_divergence_pulse[sm*NUM_SUB_PARTITIONS+sp] =
+            assign observed_divergence_pulse[sm*`NUM_SUB_PARTITIONS+sp] =
                 dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.ctx_wb.valid &&
                 dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.ctx_wb.is_divergent;
-            assign observed_retire_pulse[sm*NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.ctx_wb.valid;
+            assign observed_retire_pulse[sm*`NUM_SUB_PARTITIONS+sp] = dut.gen_sm_array[sm].u_sm.gen_sub_partitions[sp].u_sp.ctx_wb.valid;
         end
     end
     always @(posedge clk) begin
@@ -502,17 +495,17 @@ module gpc_top_tb;
     end
     task automatic check_counters;
         reg [31:0] saved;
-        for (int c = 0; c < PERF_COUNT; c++) lite_read(32'h30 + 32'(c*4), counters[c]);
-        if (counters[PERF_CYCLE] == 0 || counters[PERF_CYCLE] != 32'(launch_to_irq_cycles) || counters[PERF_INST_RETIRED] != 32'(observed_retired) ||
-            counters[PERF_WARP_ISSUE] != 32'(observed_issue) ||
-            counters[PERF_WARP_ISSUE] != counters[PERF_INST_RETIRED] ||
-            counters[PERF_WARP_DONE] != 32'(grid_x*grid_y)) $fatal(1, "Counter issue/retire/warp totals mismatch");
-        if (counters[PERF_L1_REQ] != counters[PERF_L1_HIT]+counters[PERF_L1_MISS] ||
-            counters[PERF_L2_REQ] != counters[PERF_L2_HIT]+counters[PERF_L2_MISS] ||
-            counters[PERF_L1_REQ] == 0 || counters[PERF_L2_REQ] == 0)
+        for (int c = 0; c < `PERF_COUNT; c++) lite_read(32'h30 + 32'(c*4), counters[c]);
+        if (counters[`PERF_CYCLE] == 0 || counters[`PERF_CYCLE] != 32'(launch_to_irq_cycles) || counters[`PERF_INST_RETIRED] != 32'(observed_retired) ||
+            counters[`PERF_WARP_ISSUE] != 32'(observed_issue) ||
+            counters[`PERF_WARP_ISSUE] != counters[`PERF_INST_RETIRED] ||
+            counters[`PERF_WARP_DONE] != 32'(grid_x*grid_y)) $fatal(1, "Counter issue/retire/warp totals mismatch");
+        if (counters[`PERF_L1_REQ] != counters[`PERF_L1_HIT]+counters[`PERF_L1_MISS] ||
+            counters[`PERF_L2_REQ] != counters[`PERF_L2_HIT]+counters[`PERF_L2_MISS] ||
+            counters[`PERF_L1_REQ] == 0 || counters[`PERF_L2_REQ] == 0)
             $fatal(1, "Counter cache invariants mismatch");
         repeat (20) @(negedge clk);
-        for (int c = 0; c < PERF_COUNT; c++) begin
+        for (int c = 0; c < `PERF_COUNT; c++) begin
             lite_read(32'h30+32'(c*4), saved);
             if (saved !== counters[c]) $fatal(1, "Counter changed after completion index=%0d", c);
         end
@@ -542,7 +535,7 @@ module gpc_top_tb;
         if (fd == 0) $fatal(1, "Cannot open GPC launch config");
         rc = $fscanf(fd, "%d %d %d %d %h %h", grid_x, grid_y, block_x, block_y, src_addr, dst_addr);
         $fclose(fd);
-        if (rc != 6 || grid_x < 1 || grid_x > 65535 || grid_y < 1 || grid_y > 65535 || block_x != 2 || block_y != 1)
+        if (rc != 6 || grid_x < 1 || grid_x > 65535 || grid_y < 1 || grid_y > 65535 || block_x < 1 || block_y < 1 || (block_x * block_y) > 1024)
             $fatal(1, "Unsupported GPC launch configuration");
         fd = $fopen(program_path, "r");
         if (fd == 0) $fatal(1, "Cannot open kernel");
@@ -550,7 +543,7 @@ module gpc_top_tb;
         while (!$feof(fd)) begin
             rc = $fscanf(fd, "%h", instruction);
             if (rc == 1) begin
-                if (count >= IRAM_DEPTH) $fatal(1, "Kernel exceeds I-RAM");
+                if (count >= `IRAM_DEPTH) $fatal(1, "Kernel exceeds I-RAM");
                 lite_write(32'h1000 + 32'(count*4), instruction, count % 3);
                 count++;
             end else if (!$feof(fd)) $fatal(1, "Malformed kernel");
@@ -578,12 +571,12 @@ module gpc_top_tb;
         if (status != 0 || irq) $fatal(1, "INT_ACK did not clear completion");
 `ifdef ENABLE_GPU_DEBUG
         check_counters();
-        first_retired = counters[PERF_INST_RETIRED];
+        first_retired = counters[`PERF_INST_RETIRED];
         // A second launch must reset the bank rather than accumulate both runs.
         lite_write(32'h00, 1);
         do lite_read(32'h04, status); while (!status[0]);
         check_counters();
-        if (counters[PERF_INST_RETIRED] != first_retired) $fatal(1, "Launch did not reset counters");
+        if (counters[`PERF_INST_RETIRED] != first_retired) $fatal(1, "Launch did not reset counters");
         counter_fd = $fopen("counters.txt", "w");
         if (counter_fd == 0) $fatal(1, "Cannot open counters.txt");
         $fwrite(counter_fd, "cycle_count: %0d\n", counters[0]);
@@ -603,7 +596,7 @@ module gpc_top_tb;
         $fclose(counter_fd);
         lite_write(32'h08, 1);
         lite_write(32'h2c, 1);
-        for (int c = 0; c < PERF_COUNT; c++) begin
+        for (int c = 0; c < `PERF_COUNT; c++) begin
             lite_read(32'h30+32'(c*4), status);
             if (status != 0) $fatal(1, "Manual counter clear failed index=%0d", c);
         end

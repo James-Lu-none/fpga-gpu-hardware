@@ -20,7 +20,7 @@ TESTS ?= \
 	test_opencl_branch_divergence.c
 
 GPC_SOURCES := \
-	$(RTL)/gpu_pkg.sv \
+	$(wildcard $(RTL)/common/*.vh) \
 	$(wildcard $(RTL)/common/*.sv) \
 	$(wildcard $(RTL)/sm/*.sv) \
 	$(wildcard $(RTL)/sm/sp/*.sv) \
@@ -55,7 +55,7 @@ lsu-reset-check: $(BUILD)/lsu-reset/Vlsu_reset_tb
 
 $(BUILD)/lsu-reset/Vlsu_reset_tb: unit/lsu_reset/lsu_reset_tb.sv $(GPC_SOURCES)
 	mkdir -p $(BUILD)/lsu-reset
-	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv unit/lsu_reset/lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module lsu_reset_tb --Mdir $(BUILD)/lsu-reset $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/lsu.sv unit/lsu_reset/lsu_reset_tb.sv > $(BUILD)/lsu-reset/compile.log 2>&1 || { cat $(BUILD)/lsu-reset/compile.log; exit 1; }
 
 .PHONY: sm-commit-check
 sm-commit-check: $(BUILD)/sm-commit/Vsm_commit_tb
@@ -69,15 +69,15 @@ $(BUILD)/sm-commit/Vsm_commit_tb: unit/sm_commit/sm_commit_tb.sv $(GPC_SOURCES)
 cache-store-check: $(BUILD)/cache-store/Vcache_store_tb
 	./$(BUILD)/cache-store/Vcache_store_tb
 
-$(BUILD)/cache-store/Vcache_store_tb: unit/cache_store/cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_line_ram.sv $(RTL)/common/cache_if.sv $(RTL)/gpu_pkg.sv
+$(BUILD)/cache-store/Vcache_store_tb: unit/cache_store/cache_store_tb.sv $(RTL)/common/unified_cache.sv $(RTL)/common/cache_line_ram.sv $(RTL)/common/cache_if.sv
 	mkdir -p $(BUILD)/cache-store
-	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/gpu_pkg.sv $(RTL)/common/cache_if.sv $(RTL)/common/cache_line_ram.sv $(RTL)/common/unified_cache.sv unit/cache_store/cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
+	$(VERILATOR) --binary --timing --assert -j $(JOBS) -Wno-fatal -I$(RTL)/common --top-module cache_store_tb --Mdir $(BUILD)/cache-store $(RTL)/common/cache_if.sv $(RTL)/common/cache_line_ram.sv $(RTL)/common/unified_cache.sv unit/cache_store/cache_store_tb.sv > $(BUILD)/cache-store/compile.log 2>&1 || { cat $(BUILD)/cache-store/compile.log; exit 1; }
 
 .PHONY: vrf-check
 vrf-check: $(BUILD)/vrf/Vvector_regfile_tb
 	./$(BUILD)/vrf/Vvector_regfile_tb
 
-VRF_TEST_SOURCES := $(RTL)/gpu_pkg.sv $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv unit/vector_regfile/vector_regfile_tb.sv
+VRF_TEST_SOURCES := $(RTL)/common/gpu_interfaces.sv $(RTL)/sm/sp/vector_regfile_ram.sv $(RTL)/sm/sp/vector_regfile.sv unit/vector_regfile/vector_regfile_tb.sv
 $(BUILD)/vrf/Vvector_regfile_tb: $(VRF_TEST_SOURCES)
 	mkdir -p $(BUILD)/vrf
 	$(VERILATOR) $(FLAGS) --top-module vector_regfile_tb --Mdir $(BUILD)/vrf $(VRF_TEST_SOURCES) > $(BUILD)/vrf/compile.log 2>&1 || { cat $(BUILD)/vrf/compile.log; exit 1; }

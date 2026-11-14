@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module sm_commit_tb;
     reg clk = 0;
@@ -26,12 +26,10 @@ module sm_commit_tb;
 
 `ifdef ENABLE_GPU_DEBUG
     reg perf_clear = 0;
-    wire [31:0] perf_increments [0:PERF_COUNT-1];
+    wire [31:0] perf_increments [0:`PERF_COUNT-1];
 `endif
 
-    streaming_multiprocessor #(
-        .NUM_SPS(4)
-    ) dut (
+    streaming_multiprocessor dut (
         .clk(clk),
         .rst_n(rst_n),
         .flush(1'b0),
@@ -39,6 +37,8 @@ module sm_commit_tb;
         .block_idx_x(block_idx_x),
         .block_idx_y(block_idx_y),
         .warps_per_block(warps_per_block),
+        .threads_per_block(16'd0),
+        .block_dim_x(16'd0),
         .block_accepted(block_accepted),
         .available_warp_slots(available_warp_slots),
         .sm_idle(sm_idle),
