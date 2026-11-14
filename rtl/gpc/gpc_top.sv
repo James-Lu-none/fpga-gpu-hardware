@@ -2,11 +2,9 @@
 // Graphics Processing Cluster (GPC)
 // Wraps Multiple Streaming Multiprocessors (SMs), TBS Scheduler, and Shared L2 Cache
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
-module gpc_top #(
-    parameter NUM_SM_INST = gpu_pkg::NUM_SMS
-)(
+module gpc_top (
     input wire clk,
     input wire rst_n,
 
@@ -21,6 +19,8 @@ module gpc_top #(
     output wire l2_act,
     output wire gpu_completion_irq
 );
+
+    localparam NUM_SM_INST = `NUM_SMS;
 
     // Reset Pipeline (Level 1)
     // Reset distribution stage, not a CDC synchronizer. Allow driver replication.
@@ -49,29 +49,29 @@ module gpc_top #(
 
 `ifdef ENABLE_GPU_DEBUG
     wire perf_clear;
-    wire [31:0] sm_perf_increments [0:NUM_SM_INST-1][0:PERF_COUNT-1];
-    wire [PERF_COUNT-1:0] l2_perf_events;
-    reg [31:0] perf_increments_comb [0:PERF_COUNT-1];
+    wire [31:0] sm_perf_increments [0:NUM_SM_INST-1][0:`PERF_COUNT-1];
+    wire [`PERF_COUNT-1:0] l2_perf_events;
+    reg [31:0] perf_increments_comb [0:`PERF_COUNT-1];
     always_comb begin
-        for (int c = 0; c < PERF_COUNT; c++) begin
+        for (int c = 0; c < `PERF_COUNT; c++) begin
             perf_increments_comb[c] = 32'(l2_perf_events[c]);
             for (int sm = 0; sm < NUM_SM_INST; sm++)
                 perf_increments_comb[c] = perf_increments_comb[c] + sm_perf_increments[sm][c];
         end
-        perf_increments_comb[PERF_AXI_READ_STALL_CYCLES] = 32'(m_axi_gmem.arvalid && !m_axi_gmem.arready);
-        perf_increments_comb[PERF_AXI_WRITE_STALL_CYCLES] = 32'((m_axi_gmem.awvalid && !m_axi_gmem.awready) ||
+        perf_increments_comb[`PERF_AXI_READ_STALL_CYCLES] = 32'(m_axi_gmem.arvalid && !m_axi_gmem.arready);
+        perf_increments_comb[`PERF_AXI_WRITE_STALL_CYCLES] = 32'((m_axi_gmem.awvalid && !m_axi_gmem.awready) ||
             (m_axi_gmem.wvalid && !m_axi_gmem.wready));
     end
 
     // Pipeline register: register perf_increments crossing from GPC to gpc_control_register
-    reg [31:0] perf_increments [0:PERF_COUNT-1];
+    reg [31:0] perf_increments [0:`PERF_COUNT-1];
     always @(posedge clk or negedge gpc_rst_n) begin
         if (!gpc_rst_n) begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= 32'd0;
         end else if (perf_clear) begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= 32'd0;
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= 32'd0;
         end else begin
-            for (int c = 0; c < PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
+            for (int c = 0; c < `PERF_COUNT; c++) perf_increments[c] <= perf_increments_comb[c];
         end
     end
 `endif
@@ -98,9 +98,9 @@ module gpc_top #(
     );
 
     // 2. Dynamic Thread Block Scheduler (TBS / GigaThread Engine)
-    wire [(NUM_SMS*5)-1:0] sm_available_warp_slots;
-    wire [NUM_SMS-1:0] sm_block_accepted;
-    wire [NUM_SMS-1:0] sm_block_issue_valid;
+    wire [(`NUM_SMS*5)-1:0] sm_available_warp_slots;
+    wire [`NUM_SMS-1:0] sm_block_accepted;
+    wire [`NUM_SMS-1:0] sm_block_issue_valid;
     wire [15:0] sm_block_idx_x;
     wire [15:0] sm_block_idx_y;
     wire [9:0] sm_warps_per_block;
@@ -140,9 +140,7 @@ module gpc_top #(
     for (genvar n = 0; n < NUM_SM_INST; n = n + 1) begin : gen_sm_array
         assign sm_available_warp_slots[(n*5) +: 5] = sm_slots[n];
 
-        streaming_multiprocessor #(
-            .NUM_SPS (NUM_SUB_PARTITIONS)
-        ) u_sm (
+        streaming_multiprocessor u_sm (
             .clk                  (clk),
             .rst_n                (gpc_rst_n),
             .flush                (cache_flush),
@@ -150,6 +148,8 @@ module gpc_top #(
             .block_idx_x          (sm_block_idx_x),
             .block_idx_y          (sm_block_idx_y),
             .warps_per_block      (sm_warps_per_block),
+            .threads_per_block    (block_dim_x * block_dim_y),
+            .block_dim_x          (block_dim_x),
             .block_accepted       (sm_block_accepted[n]),
             .available_warp_slots (sm_slots[n]),
             .sm_idle              (sm_idle[n]),
@@ -173,9 +173,7 @@ module gpc_top #(
     end
 
     // 4. Shared L2 Cache & AXI4 Master (Parameterized NUM_SM_INST Ports)
-    l2_cache #(
-        .NUM_PORTS (NUM_SM_INST)
-    ) u_l2_cache (
+    l2_cache u_l2_cache (
         .clk             (clk),
         .rst_n           (gpc_rst_n),
         .flush           (cache_flush)

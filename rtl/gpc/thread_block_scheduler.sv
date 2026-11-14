@@ -3,7 +3,7 @@
 // Dynamic Thread Block Scheduler (TBS) / GigaThread Engine
 // Dispatches Thread Blocks to SMs based on runtime resource availability.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module thread_block_scheduler (
     input wire clk,
@@ -18,13 +18,13 @@ module thread_block_scheduler (
     output reg grid_done,
 
     // SM Status Interface (From SMs)
-    // Flattened array of available warp slots per SM [NUM_SMS-1:0][4:0]
-    input wire [(NUM_SMS*5)-1:0] sm_available_warp_slots,
-    input wire [NUM_SMS-1:0] sm_block_accepted,
-    input wire [NUM_SMS-1:0] sm_idle,
+    // Flattened array of available warp slots per SM [`NUM_SMS-1:0][4:0]
+    input wire [(`NUM_SMS*5)-1:0] sm_available_warp_slots,
+    input wire [`NUM_SMS-1:0] sm_block_accepted,
+    input wire [`NUM_SMS-1:0] sm_idle,
 
     // SM Dispatch Interface (To SMs)
-    output reg [NUM_SMS-1:0] sm_block_issue_valid,
+    output reg [`NUM_SMS-1:0] sm_block_issue_valid,
     output reg [15:0] sm_block_idx_x,
     output reg [15:0] sm_block_idx_y,
     output reg [9:0] sm_warps_per_block,
@@ -32,10 +32,10 @@ module thread_block_scheduler (
 );
 
     // Unpack available warp slots for easier access
-    wire [4:0] sm_slots [0:NUM_SMS-1];
+    wire [4:0] sm_slots [0:`NUM_SMS-1];
     genvar i;
     generate
-        for (i = 0; i < NUM_SMS; i = i + 1) begin : unpack_slots
+        for (i = 0; i < `NUM_SMS; i = i + 1) begin : unpack_slots
             assign sm_slots[i] = sm_available_warp_slots[(i*5) +: 5];
         end
     endgenerate
@@ -46,7 +46,7 @@ module thread_block_scheduler (
     localparam STATE_WAIT_ACK = 2'd2;
     localparam STATE_WAIT_DONE = 2'd3;
 
-    localparam SM_IDX_W = (NUM_SMS > 1) ? $clog2(NUM_SMS) : 1;
+    localparam SM_IDX_W = (`NUM_SMS > 1) ? $clog2(`NUM_SMS) : 1;
 
     reg [1:0] state;
     reg [15:0] current_block_x;
@@ -68,7 +68,7 @@ module thread_block_scheduler (
         best_sm = '0;
         sm_found = 1'b0;
         
-        for (j = 0; j < NUM_SMS; j = j + 1) begin
+        for (j = 0; j < `NUM_SMS; j = j + 1) begin
             if (sm_slots[j] >= warps_per_block && sm_slots[j] > max_slots) begin
                 max_slots = sm_slots[j];
                 best_sm = SM_IDX_W'(j);
@@ -84,7 +84,7 @@ module thread_block_scheduler (
         if (!rst_n) begin
             state <= STATE_IDLE;
             grid_done <= 1'b0;
-            sm_block_issue_valid <= {NUM_SMS{1'b0}};
+            sm_block_issue_valid <= {`NUM_SMS{1'b0}};
             chosen_sm_idx <= '0;
         end else begin
             case (state)
@@ -93,9 +93,9 @@ module thread_block_scheduler (
                     if (start) begin
                         current_block_x <= 0;
                         current_block_y <= 0;
-                        // Calculate warps per block: ceil(threads / WARP_SIZE)
+                        // Calculate warps per block: ceil(threads / `WARP_SIZE)
                         threads_per_block = block_dim_x * block_dim_y;
-                        warps_per_block <= 5'((threads_per_block + WARP_SIZE - 1) / WARP_SIZE);
+                        warps_per_block <= 5'((threads_per_block + `WARP_SIZE - 1) / `WARP_SIZE);
                         state <= STATE_ISSUE;
                     end
                 end

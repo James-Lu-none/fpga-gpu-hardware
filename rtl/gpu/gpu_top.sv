@@ -2,8 +2,8 @@
 // GPU Top Module
 // Encapsulates the RISC-V Command Processor (CP) and the Graphics Processing Cluster
 
+`include "gpu_defines.vh"
 import address_pkg::*;
-import gpu_pkg::*;
 
 module gpu_top (
     input wire clk,

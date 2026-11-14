@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 // Decodes Host (PCIe BAR0) and PicoRV32 Control & Status Registers (0x0002_0000 ~ 0x0002_0FFF)
 // - 0x00: Host Doorbell / CPU IRQ (Bit 0: IRQ Assert)
@@ -136,8 +136,8 @@ module rv_control_register (
                 case (s_axi_lite.araddr[5:0])
                     6'h00:   axi_rdata <= {31'd0, irq_out};
                     6'h04:   axi_rdata <= {31'd0, cpu_soft_rst_n_out};
-                    6'h08:   axi_rdata <= gpu_pkg::HW_VERSION_MAJOR;
-                    6'h0C:   axi_rdata <= gpu_pkg::HW_VERSION_MINOR;
+                    6'h08:   axi_rdata <= `HW_VERSION_MAJOR;
+                    6'h0C:   axi_rdata <= `HW_VERSION_MINOR;
                     default: axi_rdata <= 32'd0;
                 endcase
             end else if (axi_rvalid && s_axi_lite.rready) begin

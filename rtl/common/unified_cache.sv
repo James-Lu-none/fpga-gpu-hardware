@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
 
+`include "gpu_defines.vh"
+
 module unified_cache #(
     parameter ADDR_W = 32,
     parameter DATA_W = 256,
@@ -13,7 +15,7 @@ module unified_cache #(
     cache_line_if.cache core,
     cache_line_if.client memory
 `ifdef ENABLE_GPU_DEBUG
-    , output reg [gpu_pkg::PERF_COUNT-1:0] perf_events
+    , output reg [`PERF_COUNT-1:0] perf_events
 `endif
 );
     localparam STRB_W = DATA_W / 8;
@@ -156,9 +158,9 @@ module unified_cache #(
 `ifdef ENABLE_GPU_DEBUG
     always_comb begin
         perf_events = '0;
-        perf_events[gpu_pkg::PERF_L1_REQ] = core_req_fire && !flush;
-        perf_events[gpu_pkg::PERF_L1_HIT] = state == ST_LOOKUP && !flush && valid_dout && tag_dout == req_tag_q;
-        perf_events[gpu_pkg::PERF_L1_MISS] = state == ST_LOOKUP && !flush && !(valid_dout && tag_dout == req_tag_q);
+        perf_events[`PERF_L1_REQ] = core_req_fire && !flush;
+        perf_events[`PERF_L1_HIT] = state == ST_LOOKUP && !flush && valid_dout && tag_dout == req_tag_q;
+        perf_events[`PERF_L1_MISS] = state == ST_LOOKUP && !flush && !(valid_dout && tag_dout == req_tag_q);
     end
 `endif
 endmodule

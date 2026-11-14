@@ -3,22 +3,20 @@
 // Services L1 misses from NUM_PORTS SMs and interfaces with DDR3 via AXI4.
 // Capacity: 16KB (512 lines x 32 Bytes) Direct Mapped, Write-Through
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
-module l2_cache #(
-    parameter NUM_PORTS = gpu_pkg::NUM_SMS
-)(
+module l2_cache (
     input wire clk,
     input wire rst_n,
     input wire flush,
-    input wire [NUM_PORTS-1:0] sm_req_valid,
-    input wire [31:0] sm_req_addr [0:NUM_PORTS-1],
-    input wire [255:0] sm_req_wdata [0:NUM_PORTS-1],
-    input wire [31:0] sm_req_wstrb [0:NUM_PORTS-1],
-    input wire [NUM_PORTS-1:0] sm_req_we,
-    output wire [NUM_PORTS-1:0] sm_req_ready,
-    output reg [NUM_PORTS-1:0] sm_rsp_valid,
-    output reg [255:0] sm_rsp_rdata [0:NUM_PORTS-1],
+    input wire [`NUM_SMS-1:0] sm_req_valid,
+    input wire [31:0] sm_req_addr [0:`NUM_SMS-1],
+    input wire [255:0] sm_req_wdata [0:`NUM_SMS-1],
+    input wire [31:0] sm_req_wstrb [0:`NUM_SMS-1],
+    input wire [`NUM_SMS-1:0] sm_req_we,
+    output wire [`NUM_SMS-1:0] sm_req_ready,
+    output reg [`NUM_SMS-1:0] sm_rsp_valid,
+    output reg [255:0] sm_rsp_rdata [0:`NUM_SMS-1],
     output wire m_axi_awvalid,
     output wire [31:0] m_axi_awaddr,
     output wire [7:0] m_axi_awlen,
@@ -43,9 +41,10 @@ module l2_cache #(
     input wire m_axi_rlast,
     output wire m_axi_rready
 `ifdef ENABLE_GPU_DEBUG
-    , output reg [PERF_COUNT-1:0] perf_events
+    , output reg [`PERF_COUNT-1:0] perf_events
 `endif
 );
+    localparam NUM_PORTS = `NUM_SMS;
     localparam PORT_SEL_W = (NUM_PORTS > 1) ? $clog2(NUM_PORTS) : 1;
     reg [PORT_SEL_W-1:0] current_sm;
     wire selected_valid = sm_req_valid[current_sm];
@@ -165,12 +164,12 @@ module l2_cache #(
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    wire [PERF_COUNT-1:0] cache_events;
+    wire [`PERF_COUNT-1:0] cache_events;
     always_comb begin
         perf_events = '0;
-        perf_events[PERF_L2_REQ] = cache_events[PERF_L1_REQ];
-        perf_events[PERF_L2_HIT] = cache_events[PERF_L1_HIT];
-        perf_events[PERF_L2_MISS] = cache_events[PERF_L1_MISS];
+        perf_events[`PERF_L2_REQ] = cache_events[`PERF_L1_REQ];
+        perf_events[`PERF_L2_HIT] = cache_events[`PERF_L1_HIT];
+        perf_events[`PERF_L2_MISS] = cache_events[`PERF_L1_MISS];
     end
 `endif
 endmodule

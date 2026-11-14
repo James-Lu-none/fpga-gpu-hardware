@@ -1,5 +1,7 @@
 `timescale 1ns / 1ps
 
+`include "gpu_defines.vh"
+
 // Decodes Command Processor (PicoRV32) control registers (0x0000 ~ 0x0FFF)
 // and broadcasts I-RAM writes (0x1000 ~ 0x1FFF) to all SMs.
 
@@ -32,7 +34,7 @@ module gpc_control_register (
     // clears the completion status.
     output wire       completion_irq
 `ifdef ENABLE_GPU_DEBUG
-    , input wire [31:0] perf_increments [0:gpu_pkg::PERF_COUNT-1],
+    , input wire [31:0] perf_increments [0:`PERF_COUNT-1],
     output wire perf_clear
 `endif
 );
@@ -196,8 +198,8 @@ module gpc_control_register (
                 if (!s_axi_lite.araddr[12]) begin
 `ifdef ENABLE_GPU_DEBUG
                     if (s_axi_lite.araddr[11:0] >= 12'h030 &&
-                        s_axi_lite.araddr[11:0] < 12'h030 + gpu_pkg::PERF_COUNT*4 && s_axi_lite.araddr[1:0] == 0)
-                        axi_rdata <= perf_counters[$clog2(gpu_pkg::PERF_COUNT)'((s_axi_lite.araddr[11:0] - 12'h030) >> 2)];
+                        s_axi_lite.araddr[11:0] < 12'h030 + `PERF_COUNT*4 && s_axi_lite.araddr[1:0] == 0)
+                        axi_rdata <= perf_counters[$clog2(`PERF_COUNT)'((s_axi_lite.araddr[11:0] - 12'h030) >> 2)];
                     else
 `endif
                     case (s_axi_lite.araddr[7:0])
@@ -220,7 +222,7 @@ module gpc_control_register (
     end
 
 `ifdef ENABLE_GPU_DEBUG
-    reg [31:0] perf_counters [0:gpu_pkg::PERF_COUNT-1];
+    reg [31:0] perf_counters [0:`PERF_COUNT-1];
     reg perf_running;
     reg perf_running_d1, perf_running_d2;
     wire manual_clear = aw_done && w_done && !axi_bvalid &&
@@ -231,7 +233,7 @@ module gpc_control_register (
             perf_running    <= 0;
             perf_running_d1 <= 0;
             perf_running_d2 <= 0;
-            for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
+            for (int c = 0; c < `PERF_COUNT; c++) perf_counters[c] <= 0;
         end else begin
             if (manual_clear) begin
                 perf_running    <= 0;
@@ -248,13 +250,13 @@ module gpc_control_register (
             end
 
             if (perf_clear) begin
-                for (int c = 0; c < gpu_pkg::PERF_COUNT; c++) perf_counters[c] <= 0;
+                for (int c = 0; c < `PERF_COUNT; c++) perf_counters[c] <= 0;
             end else begin
                 if (perf_running) begin
-                    perf_counters[gpu_pkg::PERF_CYCLE] <= perf_counters[gpu_pkg::PERF_CYCLE] + 1;
+                    perf_counters[`PERF_CYCLE] <= perf_counters[`PERF_CYCLE] + 1;
                 end
                 if (perf_running_d2) begin
-                    for (int c = 1; c < gpu_pkg::PERF_COUNT; c++) begin
+                    for (int c = 1; c < `PERF_COUNT; c++) begin
                         perf_counters[c] <= perf_counters[c] + perf_increments[c];
                     end
                 end
