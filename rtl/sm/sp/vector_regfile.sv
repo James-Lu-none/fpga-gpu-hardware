@@ -55,13 +55,13 @@ module vector_regfile (
     reg [$clog2(`MAX_WARPS)-1:0] decode_warp_id_q;
     reg [11:0] decode_pc_q;
     reg [31:0] decode_active_mask_q;
-    reg [7:0] decode_opcode_q;
+    (* max_fanout = 16 *) reg [7:0] decode_opcode_q;
     reg [4:0] decode_rd_q;
-    reg [31:0] decode_imm_q;
-    reg decode_is_imm_q;
-    reg [15:0] decode_block_idx_x_q;
-    reg [15:0] decode_block_idx_y_q;
-    reg [15:0] decode_thread_id_start_q;
+    (* max_fanout = 16 *) reg [31:0] decode_imm_q;
+    (* max_fanout = 16 *) reg decode_is_imm_q;
+    (* max_fanout = 16 *) reg [15:0] decode_block_idx_x_q;
+    (* max_fanout = 16 *) reg [15:0] decode_block_idx_y_q;
+    (* max_fanout = 16 *) reg [15:0] decode_thread_id_start_q;
 
     for (genvar lane = 0; lane < `NUM_LANES; lane++) begin : gen_lane_ram
         wire lane_write_enable = wb.valid && (wb.rd != 5'd0) && wb.mask[lane];

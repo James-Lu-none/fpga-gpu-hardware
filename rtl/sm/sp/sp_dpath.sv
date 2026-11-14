@@ -96,11 +96,20 @@ module sp_dpath (
         ex2_fn <= ex1_fn;
         ex2_mask <= ex1_mask;
     end
+
+    // High-fanout control buffers for wide SIMT lane array
+    (* max_fanout = 16 *) wire [7:0]  dpath_opcode          = op.opcode;
+    (* max_fanout = 16 *) wire [31:0] dpath_imm             = op.imm;
+    (* max_fanout = 16 *) wire        dpath_is_imm          = op.is_imm;
+    (* max_fanout = 16 *) wire [15:0] dpath_block_idx_x     = op.block_idx_x;
+    (* max_fanout = 16 *) wire [15:0] dpath_block_idx_y     = op.block_idx_y;
+    (* max_fanout = 16 *) wire [15:0] dpath_thread_id_start = op.thread_id_start;
+
     for (genvar k = 0; k < `NUM_LANES; k = k + 1) begin : gen_alu_lanes
         wire [31:0] a = op.rs1_data[k*32 +: 32];
         wire [31:0] rs2 = op.rs2_data[k*32 +: 32];
         // Only ADDI uses an immediate. Keep opcode-controlled muxing off MUL.
-        wire [31:0] add_b = op.is_imm ? op.imm : rs2;
+        wire [31:0] add_b = dpath_is_imm ? dpath_imm : rs2;
         wire [31:0] add_result, sub_result;
         alu_int32 u_add (.fn(3'd0), .a(a), .b(add_b), .result(add_result), .nzp());
         alu_int32 u_sub (.fn(3'd1), .a(a), .b(rs2), .result(sub_result), .nzp());
@@ -110,12 +119,12 @@ module sp_dpath (
         wire signed [31:0] s_a = a;
         wire signed [31:0] s_b = rs2;
         wire [2:0] s_nzp = {s_a < s_b, s_a == s_b, s_a > s_b};
-        wire [2:0] setcc_cond = op.imm[8:6];
+        wire [2:0] setcc_cond = dpath_imm[8:6];
         wire [31:0] setcc_result = (|(s_nzp & setcc_cond)) ? 32'd1 : 32'd0;
 
         reg [31:0] logic_result;
         always @(*) begin
-            case (op.opcode)
+            case (dpath_opcode)
                 8'h05: logic_result = a & rs2;
                 8'h06: logic_result = a | rs2;
                 8'h07: logic_result = a ^ rs2;
@@ -124,7 +133,7 @@ module sp_dpath (
             endcase
         end
 
-        wire [15:0] linear_tid = op.thread_id_start + 16'(k);
+        wire [15:0] linear_tid = dpath_thread_id_start + 16'(k);
         reg [15:0] tid_x_k;
         reg [15:0] tid_y_k;
         always @(*) begin
@@ -145,12 +154,12 @@ module sp_dpath (
         reg [31:0] special;
         always @(*) begin
             special = 32'd0;
-            if (op.opcode == 8'hB0) begin
-                case (op.imm)
+            if (dpath_opcode == 8'hB0) begin
+                case (dpath_imm)
                     32'd0: special = {16'd0, tid_x_k};
                     32'd1: special = {16'd0, tid_y_k};
-                    32'd2: special = {16'd0, op.block_idx_x};
-                    32'd3: special = {16'd0, op.block_idx_y};
+                    32'd2: special = {16'd0, dpath_block_idx_x};
+                    32'd3: special = {16'd0, dpath_block_idx_y};
                     default: special = 32'd0;
                 endcase
             end
