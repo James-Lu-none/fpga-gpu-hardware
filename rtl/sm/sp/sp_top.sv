@@ -3,7 +3,7 @@
 // Top-level module encapsulating the Warp Scheduler, Fetch/Decode, 
 // Vector Register File, and Execution Pipeline.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module sub_partition (
     input wire clk,
@@ -16,19 +16,29 @@ module sub_partition (
 
     // Warp Launch Interface (From Warp Scheduler)
     warp_alloc_if.slave alloc,
+    input wire [15:0] block_dim_x,
 
-    // L1 Cache Interface (To SM Global L1 Cache)
-    output wire l1_req_valid,
-    output wire [31:0] l1_req_addr,
-    output wire [DATA_W-1:0] l1_req_wdata,
-    output wire [7:0] l1_req_wstrb,
-    output wire l1_req_we,
-    input wire l1_req_ready,
-    input wire l1_rsp_valid,
-    input wire [DATA_W-1:0] l1_rsp_rdata
+    // Memory Interface (To SM-Level Dynamic Coalescing Engine)
+    output wire                          mem_req_valid,
+    output wire                          mem_req_is_load,
+    output wire [$clog2(`MAX_WARPS)-1:0] mem_req_warp_id,
+    output wire [4:0]                    mem_req_rd,
+    output wire [11:0]                   mem_req_pc,
+    output wire [`NUM_LANES-1:0]         mem_req_mask,
+    output wire [`WARP_DATA_W-1:0]       mem_req_addr,
+    output wire [`WARP_DATA_W-1:0]       mem_req_wdata,
+    input  wire                          mem_req_ready,
+
+    input  wire                          mem_rsp_valid,
+    input  wire [$clog2(`MAX_WARPS)-1:0] mem_rsp_warp_id,
+    input  wire [4:0]                    mem_rsp_rd,
+    input  wire [11:0]                   mem_rsp_pc,
+    input  wire [`NUM_LANES-1:0]         mem_rsp_mask,
+    input  wire                          mem_rsp_is_load,
+    input  wire [`WARP_DATA_W-1:0]       mem_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
     , input wire perf_clear,
-    output wire [PERF_COUNT-1:0] perf_events
+    output wire [`PERF_COUNT-1:0] perf_events
 `endif
 );
 
@@ -42,7 +52,7 @@ module sub_partition (
     wire core_rst_n = core_rst_n_reg;
 
 `ifdef ENABLE_GPU_DEBUG
-    wire [PERF_COUNT-1:0] ctrl_events, dpath_events;
+    wire [`PERF_COUNT-1:0] ctrl_events, dpath_events;
     assign perf_events = ctrl_events | dpath_events;
 `endif
     // Inter-module Interconnect Interfaces
@@ -69,7 +79,7 @@ module sub_partition (
     
     wire [2:0] alu_fn;
     wire ex1_valid, ex1_writes_reg;
-    wire [$clog2(MAX_WARPS)-1:0] ex1_warp_id;
+    wire [$clog2(`MAX_WARPS)-1:0] ex1_warp_id;
     wire [4:0] ex1_rd;
 
     sp_ctrl u_sp_ctrl (
@@ -96,6 +106,7 @@ module sub_partition (
     sp_dpath u_sp_dpath (
         .clk(clk),
         .rst_n(core_rst_n),
+        .block_dim_x(block_dim_x),
         .iram_we(iram_we),
         .iram_waddr(iram_waddr),
         .iram_wdata(iram_wdata),
@@ -110,14 +121,22 @@ module sub_partition (
         .ex1_writes_reg(ex1_writes_reg),
         .ex1_warp_id(ex1_warp_id),
         .ex1_rd(ex1_rd),
-        .l1_req_valid(l1_req_valid),
-        .l1_req_addr(l1_req_addr),
-        .l1_req_wdata(l1_req_wdata),
-        .l1_req_wstrb(l1_req_wstrb),
-        .l1_req_we(l1_req_we),
-        .l1_req_ready(l1_req_ready),
-        .l1_rsp_valid(l1_rsp_valid),
-        .l1_rsp_rdata(l1_rsp_rdata)
+        .mem_req_valid(mem_req_valid),
+        .mem_req_is_load(mem_req_is_load),
+        .mem_req_warp_id(mem_req_warp_id),
+        .mem_req_rd(mem_req_rd),
+        .mem_req_pc(mem_req_pc),
+        .mem_req_mask(mem_req_mask),
+        .mem_req_addr(mem_req_addr),
+        .mem_req_wdata(mem_req_wdata),
+        .mem_req_ready(mem_req_ready),
+        .mem_rsp_valid(mem_rsp_valid),
+        .mem_rsp_warp_id(mem_rsp_warp_id),
+        .mem_rsp_rd(mem_rsp_rd),
+        .mem_rsp_pc(mem_rsp_pc),
+        .mem_rsp_mask(mem_rsp_mask),
+        .mem_rsp_is_load(mem_rsp_is_load),
+        .mem_rsp_rdata(mem_rsp_rdata)
 `ifdef ENABLE_GPU_DEBUG
         , .perf_events(dpath_events)
 `endif

@@ -10,7 +10,7 @@
 // others, a "Divergence" occurs. The PC module generates a `taken_mask` 
 // and a `not_taken_mask` to split the warp.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module pc (
     input wire clk,
@@ -32,12 +32,12 @@ module pc (
     // Align context retirement with the two-cycle ALU pipeline.
     reg [0:0] op_valid_q;
     reg [7:0] op_opcode_q;
-    reg [$clog2(MAX_WARPS)-1:0] op_warp_id_q;
+    reg [$clog2(`MAX_WARPS)-1:0] op_warp_id_q;
     reg [4:0] op_rd_q;
     reg [31:0] op_imm_q;
     reg [31:0] op_active_mask_q;
     reg [11:0] op_pc_q;
-    reg [DATA_W-1:0] op_rs1_data_q;
+    reg [`WARP_DATA_W-1:0] op_rs1_data_q;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) op_valid_q <= 0;
@@ -56,12 +56,12 @@ module pc (
     // Execution Stage 1: Pipeline Registers for Operand Data
     reg ex1_valid;
     reg [7:0] ex1_opcode;
-    reg [$clog2(MAX_WARPS)-1:0] ex1_warp_id;
+    reg [$clog2(`MAX_WARPS)-1:0] ex1_warp_id;
     reg [4:0] ex1_rd;
     reg [31:0] ex1_imm;
     reg [31:0] ex1_active_mask;
     reg [11:0] ex1_pc;
-    reg [DATA_W-1:0] ex1_rs1_data;
+    reg [`WARP_DATA_W-1:0] ex1_rs1_data;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -91,13 +91,13 @@ module pc (
     // Register-based branching:
     // If rd == 0 (R0): unconditional branch (all active lanes take the branch).
     // If rd != 0 (R1..R31): lane l branches if VRF[rd][l] != 0.
-    wire [NUM_LANES-1:0] branch_take;
-    for (genvar l = 0; l < NUM_LANES; l = l + 1) begin : gen_branch_take
+    wire [`NUM_LANES-1:0] branch_take;
+    for (genvar l = 0; l < `NUM_LANES; l = l + 1) begin : gen_branch_take
         wire lane_cond = (ex1_rd == 5'd0) ? 1'b1 : (ex1_rs1_data[l*32 +: 32] != 32'd0);
         assign branch_take[l] = lane_cond && ex1_active_mask[l];
     end
     
-    wire [31:0] comb_taken_mask = {{(32-NUM_LANES){1'b0}}, branch_take};
+    wire [31:0] comb_taken_mask = {{(32-`NUM_LANES){1'b0}}, branch_take};
     wire [31:0] comb_not_taken_mask = ex1_active_mask & ~comb_taken_mask;
 
     // Execution Stage 3: Write-Back signals

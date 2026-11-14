@@ -8,7 +8,7 @@
 // the stack and follows the 'Taken' path. When a 'SYNC' instruction is hit, 
 // it pops the stack to resume the other path. ('if' branch first, 'else' branch second)
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module warp_context (
     input wire clk,
@@ -24,7 +24,7 @@ module warp_context (
     ctx_wb_if.slave ctx_wb
 `ifdef ENABLE_GPU_DEBUG
     , input wire perf_clear,
-    output reg [PERF_COUNT-1:0] perf_events
+    output reg [`PERF_COUNT-1:0] perf_events
 `endif
 );
 
@@ -35,18 +35,18 @@ module warp_context (
     localparam STATE_DONE = 2'd3;
 
     // Context RAM Arrays
-    reg [1:0] warp_state [0:MAX_WARPS-1];
-    reg [11:0] warp_pc [0:MAX_WARPS-1];
-    reg [31:0] warp_mask [0:MAX_WARPS-1];
-    reg [15:0] warp_block_id [0:MAX_WARPS-1];
-    reg [15:0] warp_block_idx_x [0:MAX_WARPS-1];
-    reg [15:0] warp_block_idx_y [0:MAX_WARPS-1];
-    reg [15:0] warp_thread_id_start [0:MAX_WARPS-1];
+    reg [1:0] warp_state [0:`MAX_WARPS-1];
+    reg [11:0] warp_pc [0:`MAX_WARPS-1];
+    reg [31:0] warp_mask [0:`MAX_WARPS-1];
+    reg [15:0] warp_block_id [0:`MAX_WARPS-1];
+    reg [15:0] warp_block_idx_x [0:`MAX_WARPS-1];
+    reg [15:0] warp_block_idx_y [0:`MAX_WARPS-1];
+    reg [15:0] warp_thread_id_start [0:`MAX_WARPS-1];
 
     // SIMT Stack (Active Mask Stack)
     // Depth = 4. Stores {12-bit PC, 32-bit Mask}
-    reg [43:0] simt_stack [0:MAX_WARPS-1][0:3];
-    reg [2:0] simt_sp [0:MAX_WARPS-1];
+    reg [43:0] simt_stack [0:`MAX_WARPS-1][0:3];
+    reg [2:0] simt_sp [0:`MAX_WARPS-1];
 
     // Track free slots via an counter instead of scanning all warp states every cycle.
     // alloc_fire consumes a slot; done_fire (warp retirement) releases a slot.
@@ -57,7 +57,7 @@ module warp_context (
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            free_warps_cnt <= MAX_WARPS[4:0];
+            free_warps_cnt <= 5'(`MAX_WARPS);
         end else begin
             case ({alloc_fire, done_fire})
                 2'b10: free_warps_cnt <= free_warps_cnt - 1'b1;
@@ -71,19 +71,19 @@ module warp_context (
     assign alloc.ready = has_free_warp;
 
     // Find the lowest index free warp slot for allocation
-    reg [$clog2(MAX_WARPS)-1:0] free_warp_idx;
+    reg [$clog2(`MAX_WARPS)-1:0] free_warp_idx;
     integer i;
     always @(*) begin
         free_warp_idx = '0;
-        for (i = MAX_WARPS-1; i >= 0; i = i - 1) begin
+        for (i = `MAX_WARPS-1; i >= 0; i = i - 1) begin
             if (warp_state[i] == STATE_FREE || warp_state[i] == STATE_DONE) begin
-                free_warp_idx = $clog2(MAX_WARPS)'(i);
+                free_warp_idx = $clog2(`MAX_WARPS)'(i);
             end
         end
     end
 
     // Round-Robin Scheduler State
-    reg [$clog2(MAX_WARPS)-1:0] rr_idx;
+    reg [$clog2(`MAX_WARPS)-1:0] rr_idx;
 
     // Main Context Update & Scheduler Block
     always @(posedge clk or negedge rst_n) begin
@@ -97,7 +97,7 @@ module warp_context (
             issue.block_idx_y <= 16'd0;
             issue.thread_id_start <= 16'd0;
             
-            for (integer j = 0; j < MAX_WARPS; j = j + 1) begin
+            for (integer j = 0; j < `MAX_WARPS; j = j + 1) begin
                 warp_state[j] <= STATE_FREE;
                 simt_sp[j] <= 3'd0;
             end
@@ -163,14 +163,14 @@ module warp_context (
             // Look for a READY warp starting from rr_idx
             // Simplified combinational scan for 16 warps
             begin : rr_scheduler
-                reg [$clog2(MAX_WARPS)-1:0] next_idx;
+                reg [$clog2(`MAX_WARPS)-1:0] next_idx;
                 reg found;
                 found = 1'b0;
                 next_idx = rr_idx;
                 
-                for (integer k = 0; k < MAX_WARPS; k = k + 1) begin
-                    logic [$clog2(MAX_WARPS)-1:0] cand_idx;
-                    cand_idx = $clog2(MAX_WARPS)'((32'(rr_idx) + k) % MAX_WARPS);
+                for (integer k = 0; k < `MAX_WARPS; k = k + 1) begin
+                    logic [$clog2(`MAX_WARPS)-1:0] cand_idx;
+                    cand_idx = $clog2(`MAX_WARPS)'((32'(rr_idx) + k) % `MAX_WARPS);
                     if (!found && warp_state[cand_idx] == STATE_READY) begin
                         found = 1'b1;
                         next_idx = cand_idx;
@@ -191,7 +191,7 @@ module warp_context (
                     warp_state[next_idx] <= STATE_STALL;
                     
                     // Move Round-Robin index to next warp
-                    rr_idx <= $clog2(MAX_WARPS)'((32'(next_idx) + 1) % MAX_WARPS);
+                    rr_idx <= $clog2(`MAX_WARPS)'((32'(next_idx) + 1) % `MAX_WARPS);
                 end else begin
                     issue.valid <= 1'b0;
                 end
@@ -203,9 +203,9 @@ module warp_context (
 `ifdef ENABLE_GPU_DEBUG
     always_comb begin
         perf_events = '0;
-        perf_events[PERF_INST_RETIRED] = ctx_wb.valid;
-        perf_events[PERF_WARP_ISSUE] = issue.valid;
-        perf_events[PERF_WARP_DONE] = ctx_wb.valid && ctx_wb.is_done;
+        perf_events[`PERF_INST_RETIRED] = ctx_wb.valid;
+        perf_events[`PERF_WARP_ISSUE] = issue.valid;
+        perf_events[`PERF_WARP_DONE] = ctx_wb.valid && ctx_wb.is_done;
     end
 `endif
 endmodule

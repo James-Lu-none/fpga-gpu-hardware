@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module sp_ctrl (
     input wire clk, rst_n,
@@ -14,11 +14,11 @@ module sp_ctrl (
     output wire [2:0] alu_fn,
     output wire ex1_writes_reg,
     output reg ex1_valid,
-    output reg [$clog2(MAX_WARPS)-1:0] ex1_warp_id,
+    output reg [$clog2(`MAX_WARPS)-1:0] ex1_warp_id,
     output reg [4:0] ex1_rd
 `ifdef ENABLE_GPU_DEBUG
     , input wire perf_clear,
-    output wire [PERF_COUNT-1:0] perf_events
+    output wire [`PERF_COUNT-1:0] perf_events
 `endif
 );
     // Keep the internal producer/consumer interface separate from the output
@@ -39,7 +39,7 @@ module sp_ctrl (
     // single skid entry is insufficient: while it is full, another LSU
     // response can arrive in the same cycle as an ALU result. Dropping that
     // ctx_wb pulse leaves the corresponding warp permanently in STALL.
-    localparam LSU_WB_QUEUE_DEPTH = MAX_WARPS;
+    localparam LSU_WB_QUEUE_DEPTH = `MAX_WARPS;
     localparam LSU_WB_PTR_W = (LSU_WB_QUEUE_DEPTH > 1) ? $clog2(LSU_WB_QUEUE_DEPTH) : 1;
     localparam LSU_WB_COUNT_W = $clog2(LSU_WB_QUEUE_DEPTH + 1);
 
@@ -47,12 +47,12 @@ module sp_ctrl (
     reg [LSU_WB_PTR_W-1:0] lsu_wb_rd_ptr;
     reg [LSU_WB_COUNT_W-1:0] lsu_wb_count;
     reg lsu_wb_valid_q [0:LSU_WB_QUEUE_DEPTH-1];
-    reg [$clog2(MAX_WARPS)-1:0] lsu_wb_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [$clog2(`MAX_WARPS)-1:0] lsu_wb_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
     reg [4:0] lsu_wb_rd_q [0:LSU_WB_QUEUE_DEPTH-1];
-    reg [32*NUM_LANES-1:0] lsu_wb_data_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [`WARP_DATA_W-1:0] lsu_wb_data_q [0:LSU_WB_QUEUE_DEPTH-1];
     reg [31:0] lsu_wb_mask_q [0:LSU_WB_QUEUE_DEPTH-1];
     reg lsu_ctx_valid_q [0:LSU_WB_QUEUE_DEPTH-1];
-    reg [$clog2(MAX_WARPS)-1:0] lsu_ctx_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
+    reg [$clog2(`MAX_WARPS)-1:0] lsu_ctx_warp_id_q [0:LSU_WB_QUEUE_DEPTH-1];
     reg [11:0] lsu_ctx_next_pc_q [0:LSU_WB_QUEUE_DEPTH-1];
 
     wire alu_active = alu_wb.valid || ctx_alu_wb.valid;
@@ -156,7 +156,7 @@ module sp_ctrl (
     // execution stage consumed by the common writeback/PC logic.
     reg mul_align_valid;
     reg [7:0] mul_align_opcode;
-    reg [$clog2(MAX_WARPS)-1:0] mul_align_warp_id;
+    reg [$clog2(`MAX_WARPS)-1:0] mul_align_warp_id;
     reg [4:0] mul_align_rd;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) mul_align_valid <= 0;

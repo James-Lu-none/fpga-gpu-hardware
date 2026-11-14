@@ -5,7 +5,7 @@
 // BRAM read and operand capture take two cycles; only valid is reset, 
 // while RAM and payload registers retain data.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module vector_regfile (
     input wire clk,
@@ -21,7 +21,7 @@ module vector_regfile (
 );
 
     // One register entry per warp/register pair.
-    localparam BANK_DEPTH = MAX_WARPS * (NUM_REGS / 2);
+    localparam BANK_DEPTH = `MAX_WARPS * (`NUM_REGS / 2);
 
     // Two distinct nonzero sources must have opposite parity. The compiler
     // repairs conflicts; R0 is bypassed and identical sources are broadcast.
@@ -37,8 +37,8 @@ module vector_regfile (
     wire [6:0] even_address = {decode.warp_id, ((!eff_rs1[0] && eff_rs1 != 0) ? eff_rs1[4:1] : eff_rs2[4:1])};
     wire [6:0] odd_address = {decode.warp_id, (eff_rs1[0] ? eff_rs1[4:1] : eff_rs2[4:1])};
 
-    wire [DATA_W-1:0] even_data_read;
-    wire [DATA_W-1:0] odd_data_read;
+    wire [`WARP_DATA_W-1:0] even_data_read;
+    wire [`WARP_DATA_W-1:0] odd_data_read;
 
 `ifndef SYNTHESIS
     always @(posedge clk) begin
@@ -52,7 +52,7 @@ module vector_regfile (
     // Pipeline registers for control signals
     reg [7:0] addr_rs1_q, addr_rs2_q;
     reg decode_valid_q;
-    reg [$clog2(MAX_WARPS)-1:0] decode_warp_id_q;
+    reg [$clog2(`MAX_WARPS)-1:0] decode_warp_id_q;
     reg [11:0] decode_pc_q;
     reg [31:0] decode_active_mask_q;
     reg [7:0] decode_opcode_q;
@@ -63,7 +63,7 @@ module vector_regfile (
     reg [15:0] decode_block_idx_y_q;
     reg [15:0] decode_thread_id_start_q;
 
-    for (genvar lane = 0; lane < NUM_LANES; lane++) begin : gen_lane_ram
+    for (genvar lane = 0; lane < `NUM_LANES; lane++) begin : gen_lane_ram
         wire lane_write_enable = wb.valid && (wb.rd != 5'd0) && wb.mask[lane];
         vector_regfile_ram #(.DEPTH(BANK_DEPTH), .ADDR_W(7)) u_even (
             .clk(clk), .write_enable(lane_write_enable && !wb.rd[0]),

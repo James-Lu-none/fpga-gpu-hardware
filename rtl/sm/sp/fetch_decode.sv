@@ -2,7 +2,7 @@
 // SM Fetch & Decode Stage (Programmable GPU)
 // Fetches instructions from I-RAM and decodes the custom 32-bit ISA.
 
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module fetch_decode (
     input wire clk,
@@ -23,7 +23,7 @@ module fetch_decode (
     // 0. accept instructions from gpc_control_register broadcast
     // 1. fetch instructions with issue.pc
     wire [31:0] fetched_instr;
-    instruction_ram #(.DEPTH(IRAM_DEPTH), .ADDR_W(12)) u_iram (
+    instruction_ram u_iram (
         .clk(clk), .write_enable(iram_we),
         .write_address(iram_waddr), .write_data(iram_wdata),
         .read_address(issue.pc), .read_data(fetched_instr)
@@ -31,7 +31,7 @@ module fetch_decode (
 
     // 2. accept issue signals from warp context
     reg issue_valid_q;
-    reg [$clog2(MAX_WARPS)-1:0] issue_warp_id_q;
+    reg [$clog2(`MAX_WARPS)-1:0] issue_warp_id_q;
     reg [11:0] issue_pc_q;
     reg [31:0] issue_active_mask_q;
     reg [15:0] issue_block_idx_x_q;

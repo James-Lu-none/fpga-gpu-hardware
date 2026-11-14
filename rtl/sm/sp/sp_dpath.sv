@@ -1,8 +1,9 @@
 `timescale 1ns / 1ps
-import gpu_pkg::*;
+`include "gpu_defines.vh"
 
 module sp_dpath (
     input wire clk, rst_n,
+    input wire [15:0] block_dim_x,
     input wire iram_we,
     input wire [11:0] iram_waddr,
     input wire [31:0] iram_wdata,
@@ -13,16 +14,28 @@ module sp_dpath (
     ctx_wb_if.master ctx_lsu_wb,
     input wire [2:0] alu_fn,
     input wire ex1_valid, ex1_writes_reg,
-    input wire [$clog2(MAX_WARPS)-1:0] ex1_warp_id,
+    input wire [$clog2(`MAX_WARPS)-1:0] ex1_warp_id,
     input wire [4:0] ex1_rd,
-    output wire l1_req_valid, l1_req_we,
-    output wire [31:0] l1_req_addr,
-    output wire [DATA_W-1:0] l1_req_wdata,
-    output wire [7:0] l1_req_wstrb,
-    input wire l1_req_ready, l1_rsp_valid,
-    input wire [DATA_W-1:0] l1_rsp_rdata
+    // Interface to SM-Level Dynamic Coalescing Engine
+    output wire                          mem_req_valid,
+    output wire                          mem_req_is_load,
+    output wire [$clog2(`MAX_WARPS)-1:0] mem_req_warp_id,
+    output wire [4:0]                    mem_req_rd,
+    output wire [11:0]                   mem_req_pc,
+    output wire [`NUM_LANES-1:0]         mem_req_mask,
+    output wire [`WARP_DATA_W-1:0]       mem_req_addr,
+    output wire [`WARP_DATA_W-1:0]       mem_req_wdata,
+    input  wire                          mem_req_ready,
+
+    input  wire                          mem_rsp_valid,
+    input  wire [$clog2(`MAX_WARPS)-1:0] mem_rsp_warp_id,
+    input  wire [4:0]                    mem_rsp_rd,
+    input  wire [11:0]                   mem_rsp_pc,
+    input  wire [`NUM_LANES-1:0]         mem_rsp_mask,
+    input  wire                          mem_rsp_is_load,
+    input  wire [`WARP_DATA_W-1:0]       mem_rsp_rdata
 `ifdef ENABLE_GPU_DEBUG
-    , output wire [PERF_COUNT-1:0] perf_events
+    , output wire [`PERF_COUNT-1:0] perf_events
 `endif
 );
     decode_if decode();
@@ -66,24 +79,24 @@ module sp_dpath (
 
     // Two execution stages: partial products, then low-32-bit accumulation.
     // Other ALU operations are delayed to the same completion cycle.
-    reg [31:0] ex1_add [0:NUM_LANES-1];
-    reg [31:0] ex1_sub [0:NUM_LANES-1];
-    reg [31:0] ex1_logic [0:NUM_LANES-1];
-    wire [31:0] ex2_mul [0:NUM_LANES-1];
-    reg [31:0] ex2_add [0:NUM_LANES-1], ex2_sub [0:NUM_LANES-1], ex2_special [0:NUM_LANES-1], ex2_logic [0:NUM_LANES-1];
+    reg [31:0] ex1_add [0:`NUM_LANES-1];
+    reg [31:0] ex1_sub [0:`NUM_LANES-1];
+    reg [31:0] ex1_logic [0:`NUM_LANES-1];
+    wire [31:0] ex2_mul [0:`NUM_LANES-1];
+    reg [31:0] ex2_add [0:`NUM_LANES-1], ex2_sub [0:`NUM_LANES-1], ex2_special [0:`NUM_LANES-1], ex2_logic [0:`NUM_LANES-1];
     reg [2:0] ex2_fn;
     reg [31:0] ex2_mask;
-    reg [31:0] ex1_special [0:NUM_LANES-1];
+    reg [31:0] ex1_special [0:`NUM_LANES-1];
     reg [2:0] ex1_fn;
     reg [31:0] ex1_mask;
-    wire [31:0] lane_result [0:NUM_LANES-1];
+    wire [31:0] lane_result [0:`NUM_LANES-1];
     always @(posedge clk) begin
         ex1_fn <= alu_fn;
         ex1_mask <= op.active_mask;
         ex2_fn <= ex1_fn;
         ex2_mask <= ex1_mask;
     end
-    for (genvar k = 0; k < NUM_LANES; k = k + 1) begin : gen_alu_lanes
+    for (genvar k = 0; k < `NUM_LANES; k = k + 1) begin : gen_alu_lanes
         wire [31:0] a = op.rs1_data[k*32 +: 32];
         wire [31:0] rs2 = op.rs2_data[k*32 +: 32];
         // Only ADDI uses an immediate. Keep opcode-controlled muxing off MUL.
@@ -111,13 +124,31 @@ module sp_dpath (
             endcase
         end
 
+        wire [15:0] linear_tid = op.thread_id_start + 16'(k);
+        reg [15:0] tid_x_k;
+        reg [15:0] tid_y_k;
+        always @(*) begin
+            case (block_dim_x)
+                16'd1:   begin tid_x_k = 16'd0; tid_y_k = linear_tid; end
+                16'd2:   begin tid_x_k = {15'd0, linear_tid[0]}; tid_y_k = {1'd0, linear_tid[15:1]}; end
+                16'd4:   begin tid_x_k = {14'd0, linear_tid[1:0]}; tid_y_k = {2'd0, linear_tid[15:2]}; end
+                16'd8:   begin tid_x_k = {13'd0, linear_tid[2:0]}; tid_y_k = {3'd0, linear_tid[15:3]}; end
+                16'd16:  begin tid_x_k = {12'd0, linear_tid[3:0]}; tid_y_k = {4'd0, linear_tid[15:4]}; end
+                16'd32:  begin tid_x_k = {11'd0, linear_tid[4:0]}; tid_y_k = {5'd0, linear_tid[15:5]}; end
+                default: begin
+                    tid_x_k = linear_tid;
+                    tid_y_k = 16'd0;
+                end
+            endcase
+        end
+
         reg [31:0] special;
         always @(*) begin
             special = 32'd0;
             if (op.opcode == 8'hB0) begin
                 case (op.imm)
-                    32'd0: special = {16'd0, op.thread_id_start} + 32'(k);
-                    32'd1: special = 32'd0; // local Y dimension not supported for now
+                    32'd0: special = {16'd0, tid_x_k};
+                    32'd1: special = {16'd0, tid_y_k};
                     32'd2: special = {16'd0, op.block_idx_x};
                     32'd3: special = {16'd0, op.block_idx_y};
                     default: special = 32'd0;
@@ -158,7 +189,7 @@ module sp_dpath (
             alu_wb.warp_id <= ex1_warp_id;
             alu_wb.rd      <= ex1_rd;
             alu_wb.mask    <= ex2_mask;
-            for (int k = 0; k < NUM_LANES; k = k + 1) begin
+            for (int k = 0; k < `NUM_LANES; k = k + 1) begin
                 alu_wb.data[k*32 +: 32] <= lane_result[k];
             end
         end
@@ -172,16 +203,25 @@ module sp_dpath (
         .rst_n (rst_n),
         .op (operands),
         .lsu_ready (lsu_ready),
-        
-        .l1_req_valid (l1_req_valid),
-        .l1_req_addr (l1_req_addr),
-        .l1_req_wdata (l1_req_wdata),
-        .l1_req_we (l1_req_we),
-        .l1_req_wstrb (l1_req_wstrb),
-        .l1_req_ready (l1_req_ready),
-        .l1_rsp_valid (l1_rsp_valid),
-        .l1_rsp_rdata (l1_rsp_rdata),
-        
+
+        .mem_req_valid (mem_req_valid),
+        .mem_req_is_load (mem_req_is_load),
+        .mem_req_warp_id (mem_req_warp_id),
+        .mem_req_rd (mem_req_rd),
+        .mem_req_pc (mem_req_pc),
+        .mem_req_mask (mem_req_mask),
+        .mem_req_addr (mem_req_addr),
+        .mem_req_wdata (mem_req_wdata),
+        .mem_req_ready (mem_req_ready),
+
+        .mem_rsp_valid (mem_rsp_valid),
+        .mem_rsp_warp_id (mem_rsp_warp_id),
+        .mem_rsp_rd (mem_rsp_rd),
+        .mem_rsp_pc (mem_rsp_pc),
+        .mem_rsp_mask (mem_rsp_mask),
+        .mem_rsp_is_load (mem_rsp_is_load),
+        .mem_rsp_rdata (mem_rsp_rdata),
+
         .wb (lsu_wb),
         .ctx_wb (ctx_lsu_wb)
 `ifdef ENABLE_GPU_DEBUG
