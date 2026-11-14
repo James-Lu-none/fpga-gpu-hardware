@@ -36,6 +36,7 @@ module gpc_top (
     wire [31:0] dst_addr;
     wire [15:0] grid_dim_x, grid_dim_y;
     wire [15:0] block_dim_x, block_dim_y;
+    wire [15:0] threads_per_block;
     wire        hw_trigger;
     wire        cache_flush;
     
@@ -85,6 +86,7 @@ module gpc_top (
         .grid_dim_y       (grid_dim_y),
         .block_dim_x      (block_dim_x),
         .block_dim_y      (block_dim_y),
+        .threads_per_block(threads_per_block),
         .src_addr         (src_addr),
         .dst_addr         (dst_addr),
         .iram_we          (iram_we_reg),
@@ -113,6 +115,7 @@ module gpc_top (
         .grid_dim_y (grid_dim_y),
         .block_dim_x (block_dim_x),
         .block_dim_y (block_dim_y),
+        .threads_per_block_in (threads_per_block),
         .grid_done (grid_done_status),
         .sm_available_warp_slots(sm_available_warp_slots),
         .sm_block_accepted (sm_block_accepted),
@@ -148,7 +151,7 @@ module gpc_top (
             .block_idx_x          (sm_block_idx_x),
             .block_idx_y          (sm_block_idx_y),
             .warps_per_block      (sm_warps_per_block),
-            .threads_per_block    (block_dim_x * block_dim_y),
+            .threads_per_block    (threads_per_block),
             .block_dim_x          (block_dim_x),
             .block_accepted       (sm_block_accepted[n]),
             .available_warp_slots (sm_slots[n]),

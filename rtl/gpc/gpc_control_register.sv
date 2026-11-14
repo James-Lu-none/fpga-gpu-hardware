@@ -19,6 +19,7 @@ module gpc_control_register (
     output reg [15:0] grid_dim_y,
     output reg [15:0] block_dim_x,
     output reg [15:0] block_dim_y,
+    output reg [15:0] threads_per_block,
     output reg [31:0] src_addr,
     output reg [31:0] dst_addr,
 
@@ -93,6 +94,7 @@ module gpc_control_register (
             grid_dim_y    <= 16'd1;
             block_dim_x   <= 16'd1;
             block_dim_y   <= 16'd1;
+            threads_per_block <= 16'd1;
             src_addr      <= 32'd0;
             dst_addr      <= 32'd0;
 
@@ -165,6 +167,9 @@ module gpc_control_register (
                     endcase
                 end
             end
+
+            // Pipelined block dimensions multiplier
+            threads_per_block <= block_dim_x * block_dim_y;
 
             // 4. Complete Write Response Handshake
             if (axi_bvalid && s_axi_lite.bready) begin

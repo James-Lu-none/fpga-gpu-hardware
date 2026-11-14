@@ -15,6 +15,7 @@ module thread_block_scheduler (
     input wire [15:0] grid_dim_y,
     input wire [15:0] block_dim_x,
     input wire [15:0] block_dim_y,
+    input wire [15:0] threads_per_block_in,
     output reg grid_done,
 
     // SM Status Interface (From SMs)
@@ -94,8 +95,7 @@ module thread_block_scheduler (
                         current_block_x <= 0;
                         current_block_y <= 0;
                         // Calculate warps per block: ceil(threads / `WARP_SIZE)
-                        threads_per_block = block_dim_x * block_dim_y;
-                        warps_per_block <= 5'((threads_per_block + `WARP_SIZE - 1) / `WARP_SIZE);
+                        warps_per_block <= 5'((threads_per_block_in + `WARP_SIZE - 1) / `WARP_SIZE);
                         state <= STATE_ISSUE;
                     end
                 end
