@@ -12,10 +12,16 @@
 `define HW_VERSION_MINOR            8'd0
 
 // Architecture Hierarchy Parameters (N, M, K)
+`ifndef NUM_SMS
 `define NUM_SMS                     1
+`endif
 `define NUM_SUB_PARTITIONS          4
+`ifndef NUM_SPS
 `define NUM_SPS                     4
+`endif
+`ifndef NUM_LANES
 `define NUM_LANES                   16
+`endif
 
 // Bit Widths & Microarchitectural Dimensions
 `define LANE_DATA_W                 32
